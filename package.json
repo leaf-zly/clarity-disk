@@ -1,0 +1,25 @@
+{
+  "name": "clarity-disk-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.20.0",
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=10.20.0"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @clarity-disk/desktop dev",
+    "build": "pnpm --filter @clarity-disk/desktop build",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "pnpm --filter @clarity-disk/desktop lint",
+    "test": "pnpm --filter @clarity-disk/desktop test",
+    "test:coverage": "pnpm --filter @clarity-disk/desktop test:coverage",
+    "typecheck": "pnpm --filter @clarity-disk/desktop typecheck",
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && cargo fmt --all --check && cargo clippy --workspace --all-targets --locked -- -D warnings && cargo test --workspace --locked"
+  },
+  "devDependencies": {
+    "prettier": "3.9.6"
+  }
+}

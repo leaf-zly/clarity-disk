@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Clarity Disk">
+  <defs>
+    <linearGradient id="background" x1="64" y1="48" x2="448" y2="464" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#62ACFF"/>
+      <stop offset="0.58" stop-color="#2479F2"/>
+      <stop offset="1" stop-color="#1454CC"/>
+    </linearGradient>
+    <linearGradient id="surface" x1="158" y1="132" x2="361" y2="382" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF" stop-opacity="0.98"/>
+      <stop offset="1" stop-color="#DCEBFF" stop-opacity="0.92"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="128" fill="url(#background)"/>
+  <path d="M140 176C140 149.49 161.49 128 188 128H324C350.51 128 372 149.49 372 176V336C372 362.51 350.51 384 324 384H188C161.49 384 140 362.51 140 336V176Z" fill="url(#surface)"/>
+  <path d="M184 204H328" stroke="#2978E8" stroke-width="24" stroke-linecap="round"/>
+  <path d="M184 256H304" stroke="#2978E8" stroke-width="24" stroke-linecap="round" opacity="0.72"/>
+  <path d="M184 308H270" stroke="#2978E8" stroke-width="24" stroke-linecap="round" opacity="0.46"/>
+  <circle cx="326" cy="310" r="30" fill="#2CCB69"/>
+  <path d="M314 310L323 319L340 300" fill="none" stroke="#FFFFFF" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

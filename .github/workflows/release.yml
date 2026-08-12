@@ -1,0 +1,99 @@
+name: Windows release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to build
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release-windows:
+    name: Build Windows release
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.97.0
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache Rust release build
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: windows-release
+          cache-targets: true
+          cache-on-failure: true
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --prefer-offline
+
+      - name: Verify frontend
+        run: pnpm --filter @clarity-disk/desktop typecheck
+
+      - name: Build NSIS installer
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: apps/desktop
+          tagName: ${{ env.RELEASE_TAG }}
+          releaseName: 澄盘 ${{ env.RELEASE_TAG }}
+          releaseBody: See CHANGELOG.md for details.
+          releaseDraft: true
+          prerelease: false
+          args: --bundles nsis
+
+      - name: Create portable archive and checksums
+        shell: pwsh
+        run: |
+          $staging = Join-Path $env:RUNNER_TEMP "clarity-disk-portable"
+          New-Item -ItemType Directory -Path $staging -Force | Out-Null
+          Copy-Item -LiteralPath "target\release\clarity-disk.exe" -Destination $staging
+          Copy-Item -LiteralPath "README.md" -Destination $staging
+          $portable = "target\release\clarity-disk-${{ env.RELEASE_TAG }}-windows-x64-portable.zip"
+          Compress-Archive -Path (Join-Path $staging "*") -DestinationPath $portable -CompressionLevel Optimal
+
+          $releaseFiles = @($portable)
+          $releaseFiles += Get-ChildItem -Path "target\release\bundle\nsis\*.exe" | ForEach-Object FullName
+          $checksumFile = "target\release\SHA256SUMS.txt"
+          $checksums = foreach ($file in $releaseFiles) {
+            $hash = Get-FileHash -LiteralPath $file -Algorithm SHA256
+            "$($hash.Hash.ToLowerInvariant())  $([IO.Path]::GetFileName($file))"
+          }
+          Set-Content -LiteralPath $checksumFile -Value $checksums -Encoding utf8
+
+          gh release upload $env:RELEASE_TAG $portable $checksumFile --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

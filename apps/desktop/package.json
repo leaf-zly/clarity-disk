@@ -1,0 +1,39 @@
+{
+  "name": "@clarity-disk/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tauri dev",
+    "dev:web": "vite --host 127.0.0.1 --port 1420",
+    "build": "pnpm typecheck && pnpm build:web",
+    "build:web": "vite build",
+    "lint": "oxlint src --deny-warnings",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "vue-tsc --build --force",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "catalog:",
+    "@lucide/vue": "catalog:",
+    "vue": "catalog:"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "catalog:",
+    "@types/node": "catalog:",
+    "@vitejs/plugin-vue": "catalog:",
+    "@vitest/coverage-v8": "catalog:",
+    "@vue/test-utils": "catalog:",
+    "happy-dom": "catalog:",
+    "oxlint": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:",
+    "vue-tsc": "catalog:"
+  },
+  "optionalDependencies": {
+    "@oxlint/binding-win32-x64-msvc": "catalog:",
+    "@rolldown/binding-win32-x64-msvc": "catalog:"
+  }
+}

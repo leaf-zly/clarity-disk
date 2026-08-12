@@ -1,0 +1,36 @@
+# JavaScript
+node_modules/
+dist/
+coverage/
+.vite/
+
+# Rust
+target/
+
+# Tauri and operating system
+*.pdb
+*.msi
+*.msix
+*.exe
+*.zip
+apps/desktop/src-tauri/icons/android/
+apps/desktop/src-tauri/icons/ios/
+apps/desktop/src-tauri/icons/icon.icns
+apps/desktop/src-tauri/icons/Square*.png
+apps/desktop/src-tauri/icons/StoreLogo.png
+.DS_Store
+Thumbs.db
+
+# Editors and local configuration
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+*.local
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+pnpm-debug.log*

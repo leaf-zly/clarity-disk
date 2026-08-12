@@ -13,9 +13,10 @@ use sysinfo::Disks;
 /// accidentally become a destructive operation.
 pub fn discover_primary_disk() -> Result<DiskSummary, DiscoveryError> {
     let disks = Disks::new_with_refreshed_list();
-    let system_root = std::env::var_os("SystemDrive")
-        .map(|drive| format!("{}\\", drive.to_string_lossy()))
-        .unwrap_or_else(|| r"C:\".to_owned());
+    let system_root = std::env::var_os("SystemDrive").map_or_else(
+        || r"C:\".to_owned(),
+        |drive| format!("{}\\", drive.to_string_lossy()),
+    );
 
     let disk = disks
         .list()

@@ -8,7 +8,7 @@ edition = "2024"
 rust-version = "1.97"
 license = "Proprietary"
 authors = ["Clarity Disk Contributors"]
-repository = "https://github.com/1249190004/clarity-disk"
+repository = "https://github.com/leaf-zly/clarity-disk"
 
 [workspace.dependencies]
 clarity-core = { path = "crates/clarity-core" }

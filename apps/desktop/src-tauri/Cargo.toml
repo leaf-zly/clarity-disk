@@ -16,7 +16,9 @@ tauri-build = { version = "2.6.3", features = [] }
 [dependencies]
 clarity-core.workspace = true
 serde.workspace = true
+sysinfo = { version = "0.37.2", default-features = false, features = ["disk"] }
 tauri.workspace = true
+thiserror.workspace = true
 
 [lints]
 workspace = true

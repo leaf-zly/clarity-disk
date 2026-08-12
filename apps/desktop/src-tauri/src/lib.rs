@@ -1,50 +1,22 @@
 //! Tauri command adapter for the Clarity Disk desktop application.
 
-use clarity_core::{
-    CleanupSummary, DashboardSnapshot, DiskCategory, DiskCategoryKind, DiskHealth, DiskSummary,
-    Suggestion, SuggestionRisk,
-};
+use clarity_core::{CleanupSummary, DashboardSnapshot, DiskHealth, Suggestion, SuggestionRisk};
+
+mod disk_discovery;
 
 const GIB: u64 = 1024 * 1024 * 1024;
 const MIB: u64 = 1024 * 1024;
 
 /// Returns the current dashboard snapshot.
 ///
-/// The first product slice uses deterministic sample data so the UI and command
-/// contract can be reviewed before privileged platform discovery is introduced.
+/// Disk capacity comes from read-only platform discovery. Cleanup categories,
+/// device health, and recommendations remain preview data until their dedicated
+/// scanners are implemented.
 #[tauri::command]
-fn get_dashboard_snapshot() -> DashboardSnapshot {
-    let disk = DiskSummary::try_new(
-        "C:",
-        "Windows · 本地磁盘 (C:)",
-        200 * GIB + 61 * MIB,
-        159 * GIB + 645 * MIB,
-        vec![
-            DiskCategory {
-                kind: DiskCategoryKind::Applications,
-                label: "应用".to_owned(),
-                bytes: 56 * GIB + 205 * MIB,
-            },
-            DiskCategory {
-                kind: DiskCategoryKind::System,
-                label: "系统".to_owned(),
-                bytes: 44 * GIB + 819 * MIB,
-            },
-            DiskCategory {
-                kind: DiskCategoryKind::Files,
-                label: "文件".to_owned(),
-                bytes: 33 * GIB + 410 * MIB,
-            },
-            DiskCategory {
-                kind: DiskCategoryKind::Development,
-                label: "开发".to_owned(),
-                bytes: 25 * GIB + 205 * MIB,
-            },
-        ],
-    )
-    .expect("embedded dashboard fixture must remain valid");
+fn get_dashboard_snapshot() -> Result<DashboardSnapshot, String> {
+    let disk = disk_discovery::discover_primary_disk().map_err(|error| error.to_string())?;
 
-    DashboardSnapshot {
+    Ok(DashboardSnapshot {
         disk,
         health: DiskHealth {
             status: "良好".to_owned(),
@@ -79,10 +51,15 @@ fn get_dashboard_snapshot() -> DashboardSnapshot {
                 reclaimable_bytes: 389 * MIB,
             },
         ],
-    }
+    })
 }
 
 /// Starts the desktop runtime and registers the minimal command surface.
+///
+/// # Panics
+///
+/// Panics when Tauri cannot initialize or the desktop event loop terminates
+/// with a fatal runtime error.
 pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![get_dashboard_snapshot])

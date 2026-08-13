@@ -7,6 +7,8 @@ use thiserror::Error;
 pub struct DashboardSnapshot {
     /// Primary system disk capacity and usage.
     pub disk: DiskSummary,
+    /// All logical volumes discovered during the same read-only snapshot.
+    pub disks: Vec<DiskSummary>,
     /// Current health status reported by the platform health provider.
     pub health: DiskHealth,
     /// Cleanup opportunity that is safe enough to present on the dashboard.
@@ -29,6 +31,8 @@ pub struct DiskSummary {
     pub used_bytes: u64,
     /// Usage categories shown in the capacity bar.
     pub categories: Vec<DiskCategory>,
+    /// Read-only platform metadata for the logical volume.
+    pub metadata: DiskMetadata,
 }
 
 impl DiskSummary {
@@ -45,6 +49,7 @@ impl DiskSummary {
         used_bytes: u64,
         categories: Vec<DiskCategory>,
     ) -> Result<Self, DashboardError> {
+        let id = id.into();
         if used_bytes > total_bytes {
             return Err(DashboardError::UsedCapacityExceedsTotal {
                 used_bytes,
@@ -64,12 +69,20 @@ impl DiskSummary {
         }
 
         Ok(Self {
-            id: id.into(),
+            id: id.clone(),
             label: label.into(),
             total_bytes,
             used_bytes,
             categories,
+            metadata: DiskMetadata::preview(id),
         })
+    }
+
+    /// Attaches read-only platform metadata discovered for this volume.
+    #[must_use]
+    pub fn with_metadata(mut self, metadata: DiskMetadata) -> Self {
+        self.metadata = metadata;
+        self
     }
 
     /// Returns the currently available capacity in bytes.
@@ -89,6 +102,55 @@ pub struct DiskCategory {
     pub label: String,
     /// Capacity attributed to this category.
     pub bytes: u64,
+}
+
+/// Read-only metadata describing a logical volume and its basic health signal.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiskMetadata {
+    /// Normalized mount point used for display and later identity checks.
+    pub mount_point: String,
+    /// File-system name reported by the operating system.
+    pub file_system: String,
+    /// Device kind reported by the platform adapter, such as SSD or HDD.
+    pub device_type: String,
+    /// Whether this volume contains the running Windows installation.
+    pub is_system_volume: bool,
+    /// Whether the device is removable.
+    pub is_removable: bool,
+    /// Whether the volume is currently read-only.
+    pub is_read_only: bool,
+    /// Basic health status based only on read-only discovery signals.
+    pub health_status: VolumeHealthStatus,
+    /// Additional explanation when the status is not a normal writable volume.
+    pub health_note: Option<String>,
+}
+
+impl DiskMetadata {
+    fn preview(id: String) -> Self {
+        Self {
+            mount_point: id,
+            file_system: String::new(),
+            device_type: "Unknown".to_owned(),
+            is_system_volume: false,
+            is_removable: false,
+            is_read_only: false,
+            health_status: VolumeHealthStatus::Healthy,
+            health_note: None,
+        }
+    }
+}
+
+/// Basic health state available without SMART or vendor-specific queries.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum VolumeHealthStatus {
+    /// The volume is online and writable according to the read-only query.
+    Healthy,
+    /// The volume is online but currently reports read-only access.
+    ReadOnly,
+    /// The platform returned a condition that requires user attention.
+    Warning,
 }
 
 /// Supported dashboard disk usage categories.
@@ -180,7 +242,10 @@ pub enum DashboardError {
 
 #[cfg(test)]
 mod tests {
-    use super::{DashboardError, DiskCategory, DiskCategoryKind, DiskSummary};
+    use super::{
+        DashboardError, DiskCategory, DiskCategoryKind, DiskMetadata, DiskSummary,
+        VolumeHealthStatus,
+    };
 
     #[test]
     fn computes_available_capacity_for_valid_summary() {
@@ -236,5 +301,24 @@ mod tests {
                 used_bytes: 100,
             }
         );
+    }
+
+    #[test]
+    fn attaches_read_only_metadata_without_changing_capacity() {
+        let summary = DiskSummary::try_new("D:", "Data", 100, 20, vec![])
+            .expect("valid capacity should construct")
+            .with_metadata(DiskMetadata {
+                mount_point: "D:\\".to_owned(),
+                file_system: "NTFS".to_owned(),
+                device_type: "SSD".to_owned(),
+                is_system_volume: false,
+                is_removable: false,
+                is_read_only: true,
+                health_status: VolumeHealthStatus::ReadOnly,
+                health_note: Some("卷当前为只读".to_owned()),
+            });
+
+        assert_eq!(summary.available_bytes(), 80);
+        assert_eq!(summary.metadata.health_status, VolumeHealthStatus::ReadOnly);
     }
 }

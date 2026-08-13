@@ -4,34 +4,39 @@
 export type DiskCategoryKind =
   "applications" | "system" | "files" | "development";
 
-/**
- * Risk levels used to control default selection and confirmation behavior.
- */
+/** Risk levels used to control default selection and confirmation behavior. */
 export type SuggestionRisk = "safe" | "review" | "confirmationRequired";
 
-/**
- * Capacity attributed to a user-facing disk category.
- */
+/** Capacity attributed to a user-facing disk category. */
 export interface DiskCategory {
   kind: DiskCategoryKind;
   label: string;
   bytes: number;
 }
 
-/**
- * Capacity and classification data for a logical volume.
- */
+/** Read-only platform metadata for a logical volume. */
+export interface DiskMetadata {
+  mountPoint: string;
+  fileSystem: string;
+  deviceType: string;
+  isSystemVolume: boolean;
+  isRemovable: boolean;
+  isReadOnly: boolean;
+  healthStatus: "healthy" | "readOnly" | "warning";
+  healthNote: string | null;
+}
+
+/** Capacity and classification data for a logical volume. */
 export interface DiskSummary {
   id: string;
   label: string;
   totalBytes: number;
   usedBytes: number;
   categories: DiskCategory[];
+  metadata: DiskMetadata;
 }
 
-/**
- * Health information returned by the platform health provider.
- */
+/** Health information returned by the platform health provider. */
 export interface DiskHealth {
   status: string;
   deviceType: string;
@@ -39,17 +44,13 @@ export interface DiskHealth {
   hasWarning: boolean;
 }
 
-/**
- * Low-risk cleanup estimate shown before a detailed scan.
- */
+/** Low-risk cleanup estimate shown before a detailed scan. */
 export interface CleanupSummary {
   reclaimableBytes: number;
   categoryCount: number;
 }
 
-/**
- * A prioritized maintenance recommendation presented to the user.
- */
+/** A prioritized maintenance recommendation presented to the user. */
 export interface Suggestion {
   id: string;
   title: string;
@@ -58,11 +59,10 @@ export interface Suggestion {
   reclaimableBytes: number;
 }
 
-/**
- * Complete dashboard payload returned by the desktop command layer.
- */
+/** Complete dashboard payload returned by the desktop command layer. */
 export interface DashboardSnapshot {
   disk: DiskSummary;
+  disks: DiskSummary[];
   health: DiskHealth;
   cleanup: CleanupSummary;
   suggestions: Suggestion[];

@@ -14,16 +14,27 @@ const MIB: u64 = 1024 * 1024;
 /// scanners are implemented.
 #[tauri::command]
 fn get_dashboard_snapshot() -> Result<DashboardSnapshot, String> {
-    let disk = disk_discovery::discover_primary_disk().map_err(|error| error.to_string())?;
+    let disks = disk_discovery::discover_disks().map_err(|error| error.to_string())?;
+    let disk = disks
+        .iter()
+        .find(|volume| volume.metadata.is_system_volume)
+        .cloned()
+        .ok_or_else(|| "Windows system volume was not found".to_owned())?;
+    let health = DiskHealth {
+        status: match disk.metadata.health_status {
+            clarity_core::VolumeHealthStatus::Healthy => "良好".to_owned(),
+            clarity_core::VolumeHealthStatus::ReadOnly => "只读".to_owned(),
+            clarity_core::VolumeHealthStatus::Warning => "需注意".to_owned(),
+        },
+        device_type: disk.metadata.device_type.clone(),
+        temperature_celsius: None,
+        has_warning: disk.metadata.health_status != clarity_core::VolumeHealthStatus::Healthy,
+    };
 
     Ok(DashboardSnapshot {
         disk,
-        health: DiskHealth {
-            status: "良好".to_owned(),
-            device_type: "NVMe".to_owned(),
-            temperature_celsius: Some(42),
-            has_warning: false,
-        },
+        disks,
+        health,
         cleanup: CleanupSummary {
             reclaimable_bytes: GIB + 860 * MIB,
             category_count: 3,

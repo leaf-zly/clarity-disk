@@ -4,5 +4,5 @@ mod dashboard;
 
 pub use dashboard::{
     CleanupSummary, DashboardError, DashboardSnapshot, DiskCategory, DiskCategoryKind, DiskHealth,
-    DiskSummary, Suggestion, SuggestionRisk,
+    DiskMetadata, DiskSummary, Suggestion, SuggestionRisk, VolumeHealthStatus,
 };

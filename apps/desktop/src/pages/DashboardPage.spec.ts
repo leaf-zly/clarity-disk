@@ -23,6 +23,8 @@ describe("DashboardPage", () => {
     expect(wrapper.text()).toContain("40.43 GB");
     expect(wrapper.text()).toContain("浏览器缓存");
     expect(wrapper.text()).toContain("可安全清理");
+    expect(wrapper.text()).toContain("磁盘与卷");
+    expect(wrapper.text()).toContain("资料 · 本地磁盘 (D:)");
   });
 
   it("offers a retry when disk discovery fails", async () => {

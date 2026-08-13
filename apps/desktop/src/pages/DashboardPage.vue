@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, shallowRef } from "vue";
+import { computed, onMounted, shallowRef } from "vue";
 import {
   CalendarClock,
   ChevronRight,
@@ -11,6 +11,7 @@ import {
 } from "@lucide/vue";
 
 import DiskUsageCard from "@/components/DiskUsageCard.vue";
+import DiskVolumeList from "@/components/DiskVolumeList.vue";
 import MetricCard from "@/components/MetricCard.vue";
 import SuggestionItem from "@/components/SuggestionItem.vue";
 import { loadDashboardSnapshot } from "@/services/dashboard-service";
@@ -19,6 +20,17 @@ import type { DashboardSnapshot } from "@/types/dashboard";
 const snapshot = shallowRef<DashboardSnapshot>();
 const loadError = shallowRef<string>();
 const isLoading = shallowRef(true);
+const selectedDiskId = shallowRef<string>();
+const selectedDisk = computed(() => {
+  if (!snapshot.value) {
+    return undefined;
+  }
+
+  return (
+    snapshot.value.disks.find((disk) => disk.id === selectedDiskId.value) ??
+    snapshot.value.disk
+  );
+});
 
 /**
  * Refreshes all dashboard data while keeping platform errors user-friendly.
@@ -30,6 +42,7 @@ async function refreshDashboard(): Promise<void> {
 
   try {
     snapshot.value = await loadDashboardSnapshot();
+    selectedDiskId.value ??= snapshot.value.disk.id;
   } catch {
     loadError.value = "暂时无法读取磁盘状态，请稍后重试。";
   } finally {
@@ -71,9 +84,15 @@ onMounted(refreshDashboard);
 
     <template v-else-if="snapshot">
       <DiskUsageCard
-        :disk="snapshot.disk"
+        :disk="selectedDisk ?? snapshot.disk"
         :reclaimable-bytes="snapshot.cleanup.reclaimableBytes"
         @open-cleanup="() => undefined"
+      />
+
+      <DiskVolumeList
+        :disks="snapshot.disks"
+        :active-disk-id="selectedDiskId ?? snapshot.disk.id"
+        @select-disk="(disk) => (selectedDiskId = disk.id)"
       />
 
       <div class="section-heading">

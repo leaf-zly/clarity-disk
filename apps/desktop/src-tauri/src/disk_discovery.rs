@@ -2,60 +2,103 @@
 
 use std::path::Path;
 
-use clarity_core::{DashboardError, DiskCategory, DiskCategoryKind, DiskSummary};
+use clarity_core::{
+    DashboardError, DiskCategory, DiskCategoryKind, DiskMetadata, DiskSummary, VolumeHealthStatus,
+};
 use sysinfo::Disks;
 
-/// Finds the primary Windows volume without changing files, permissions, or
-/// partition metadata.
-///
-/// The implementation intentionally reads only volume capacity counters.
-/// Category attribution and cleanup rules remain separate so discovery cannot
-/// accidentally become a destructive operation.
-pub fn discover_primary_disk() -> Result<DiskSummary, DiscoveryError> {
+/// Discovers every mounted logical volume using read-only operating system
+/// counters. No directory traversal, deletion, mounting, or partition change
+/// occurs in this function.
+pub fn discover_disks() -> Result<Vec<DiskSummary>, DiscoveryError> {
     let disks = Disks::new_with_refreshed_list();
-    let system_root = std::env::var_os("SystemDrive").map_or_else(
-        || r"C:\".to_owned(),
-        |drive| format!("{}\\", drive.to_string_lossy()),
-    );
-
-    let disk = disks
+    let system_root = system_root();
+    let mut discovered = disks
         .list()
         .iter()
-        .find(|disk| paths_refer_to_same_volume(disk.mount_point(), Path::new(&system_root)))
-        .ok_or(DiscoveryError::SystemVolumeNotFound)?;
+        .map(|disk| {
+            let mount_point = disk.mount_point().to_string_lossy().into_owned();
+            let id = volume_id(&mount_point);
+            let total_bytes = disk.total_space();
+            let used_bytes = total_bytes.saturating_sub(disk.available_space());
+            let is_system_volume =
+                paths_refer_to_same_volume(&mount_point, Path::new(&system_root));
+            let is_read_only = disk.is_read_only();
+            let health_status = if is_read_only {
+                VolumeHealthStatus::ReadOnly
+            } else {
+                VolumeHealthStatus::Healthy
+            };
+            let health_note = is_read_only.then(|| "卷当前报告为只读".to_owned());
+            let volume_name = disk.name().to_string_lossy();
+            let label = if volume_name.trim().is_empty() {
+                format!("本地磁盘 ({id})")
+            } else {
+                format!("{} · 本地磁盘 ({id})", volume_name.trim())
+            };
+            let categories = (used_bytes > 0).then(|| DiskCategory {
+                // A detailed category scan is the next product slice. Until
+                // then, keep occupied bytes visibly unclassified.
+                kind: DiskCategoryKind::System,
+                label: "待详细扫描".to_owned(),
+                bytes: used_bytes,
+            });
 
-    let total_bytes = disk.total_space();
-    let used_bytes = total_bytes.saturating_sub(disk.available_space());
-    let volume_name = disk.name().to_string_lossy();
-    let label = if volume_name.trim().is_empty() {
-        "Windows".to_owned()
-    } else {
-        volume_name.trim().to_owned()
-    };
-    let drive_id = system_root.trim_end_matches(['\\', '/']).to_owned();
+            DiskSummary::try_new(
+                id,
+                label,
+                total_bytes,
+                used_bytes,
+                categories.into_iter().collect(),
+            )
+            .map(|summary| {
+                summary.with_metadata(DiskMetadata {
+                    mount_point,
+                    file_system: disk.file_system().to_string_lossy().into_owned(),
+                    device_type: disk.kind().to_string(),
+                    is_system_volume,
+                    is_removable: disk.is_removable(),
+                    is_read_only,
+                    health_status,
+                    health_note,
+                })
+            })
+            .map_err(DiscoveryError::InvalidCapacity)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
 
-    DiskSummary::try_new(
-        drive_id.clone(),
-        format!("{label} · 本地磁盘 ({drive_id})"),
-        total_bytes,
-        used_bytes,
-        vec![DiskCategory {
-            // A detailed category scan is the next product slice. Until then,
-            // represent all occupied capacity as system-managed/uncategorized.
-            kind: DiskCategoryKind::System,
-            label: "待详细扫描".to_owned(),
-            bytes: used_bytes,
-        }],
+    discovered.sort_by(|left, right| {
+        right
+            .metadata
+            .is_system_volume
+            .cmp(&left.metadata.is_system_volume)
+            .then_with(|| left.id.cmp(&right.id))
+    });
+
+    if discovered.is_empty() {
+        return Err(DiscoveryError::NoVolumesFound);
+    }
+
+    Ok(discovered)
+}
+
+fn system_root() -> String {
+    std::env::var_os("SystemDrive").map_or_else(
+        || r"C:\".to_owned(),
+        |drive| format!("{}\\", drive.to_string_lossy()),
     )
-    .map_err(DiscoveryError::InvalidCapacity)
+}
+
+fn volume_id(mount_point: &str) -> String {
+    mount_point.trim_end_matches(['\\', '/']).to_owned()
 }
 
 /// Errors produced while reading the primary volume.
 #[derive(Debug, thiserror::Error)]
 pub enum DiscoveryError {
-    /// No mounted disk matched the Windows system drive.
-    #[error("Windows system volume was not found")]
-    SystemVolumeNotFound,
+    /// No mounted logical volumes were returned by the operating system.
+    #[error("no mounted volumes were found")]
+    NoVolumesFound,
     /// Capacity values could not satisfy the domain invariants.
     #[error("invalid volume capacity: {0}")]
     InvalidCapacity(#[from] DashboardError),

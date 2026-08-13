@@ -96,37 +96,37 @@ fn start_space_scan(
 
 /// Returns the latest snapshot for a space scan task.
 #[tauri::command]
-fn get_space_scan(scan_id: String) -> Result<clarity_core::SpaceScanSnapshot, String> {
+fn get_space_scan(scan_id: &str) -> Result<clarity_core::SpaceScanSnapshot, String> {
     SPACE_SCANS
         .get_or_init(space_scan::SpaceScanManager::default)
-        .snapshot(&scan_id)
+        .snapshot(scan_id)
         .map_err(|error| error.to_string())
 }
 
 /// Requests cooperative cancellation of a space scan task.
 #[tauri::command]
-fn cancel_space_scan(scan_id: String) -> Result<(), String> {
+fn cancel_space_scan(scan_id: &str) -> Result<(), String> {
     SPACE_SCANS
         .get_or_init(space_scan::SpaceScanManager::default)
-        .cancel(&scan_id)
+        .cancel(scan_id)
         .map_err(|error| error.to_string())
 }
 
 /// Pauses a running space scan at a cooperative boundary.
 #[tauri::command]
-fn pause_space_scan(scan_id: String) -> Result<(), String> {
+fn pause_space_scan(scan_id: &str) -> Result<(), String> {
     SPACE_SCANS
         .get_or_init(space_scan::SpaceScanManager::default)
-        .pause(&scan_id)
+        .pause(scan_id)
         .map_err(|error| error.to_string())
 }
 
 /// Resumes a cooperatively paused space scan.
 #[tauri::command]
-fn resume_space_scan(scan_id: String) -> Result<(), String> {
+fn resume_space_scan(scan_id: &str) -> Result<(), String> {
     SPACE_SCANS
         .get_or_init(space_scan::SpaceScanManager::default)
-        .resume(&scan_id)
+        .resume(scan_id)
         .map_err(|error| error.to_string())
 }
 

@@ -1,5 +1,6 @@
 //! Read-only cleanup rules for allow-listed browser cache locations.
 
+use std::fmt::Write;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -250,12 +251,9 @@ fn measure_tree(
         source: error,
     })?;
     for entry in entries {
-        let entry = match entry {
-            Ok(entry) => entry,
-            Err(_) => {
-                *skipped_items = skipped_items.saturating_add(1);
-                continue;
-            }
+        let Ok(entry) = entry else {
+            *skipped_items = skipped_items.saturating_add(1);
+            continue;
         };
         let path = entry.path();
         if !is_allowed_path(root, &path) {
@@ -287,15 +285,18 @@ fn format_digest(digest: impl AsRef<[u8]>) -> String {
     digest
         .as_ref()
         .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+        .fold(String::new(), |mut output, byte| {
+            write!(output, "{byte:02x}").expect("writing to a String cannot fail");
+            output
+        })
 }
 
 fn current_unix_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis().try_into().unwrap_or(u64::MAX))
-        .unwrap_or(0)
+        .map_or(0, |duration| {
+            duration.as_millis().try_into().unwrap_or(u64::MAX)
+        })
 }
 
 fn is_allowed_path(root: &Path, path: &Path) -> bool {

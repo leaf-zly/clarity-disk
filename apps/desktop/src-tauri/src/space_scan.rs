@@ -45,10 +45,12 @@ pub fn default_request(root_path: String) -> Result<SpaceScanRequest, SpaceScanE
 }
 
 fn push_existing_descendant(root: &Path, candidate: PathBuf, output: &mut Vec<String>) {
-    if let Ok(normalized) = fs::canonicalize(candidate) {
-        if normalized.is_dir() && normalized.starts_with(root) && normalized != root {
-            output.push(normalized.to_string_lossy().into_owned());
-        }
+    if let Ok(normalized) = fs::canonicalize(candidate)
+        && normalized.is_dir()
+        && normalized.starts_with(root)
+        && normalized != root
+    {
+        output.push(normalized.to_string_lossy().into_owned());
     }
 }
 
@@ -157,7 +159,7 @@ impl SpaceScanManager {
         if task.snapshot.progress.status == SpaceScanStatus::Scanning {
             task.paused.store(true, Ordering::Release);
             task.snapshot.progress.status = SpaceScanStatus::Paused;
-            task.snapshot.progress.message = "扫描已暂停".to_owned();
+            "扫描已暂停".clone_into(&mut task.snapshot.progress.message);
         }
         Ok(())
     }
@@ -171,7 +173,7 @@ impl SpaceScanManager {
         if task.snapshot.progress.status == SpaceScanStatus::Paused {
             task.paused.store(false, Ordering::Release);
             task.snapshot.progress.status = SpaceScanStatus::Scanning;
-            task.snapshot.progress.message = "正在分析目录空间".to_owned();
+            "正在分析目录空间".clone_into(&mut task.snapshot.progress.message);
         }
         Ok(())
     }
@@ -191,8 +193,7 @@ impl SpaceScanManager {
 
 fn history_path() -> PathBuf {
     std::env::var_os("LOCALAPPDATA")
-        .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir)
+        .map_or_else(std::env::temp_dir, PathBuf::from)
         .join("ClarityDisk/state/space-scan-history.json")
 }
 
@@ -376,7 +377,7 @@ impl ScanContext<'_> {
             .iter()
             .map(|Reverse(item)| item.clone())
             .collect();
-        largest.sort_by(|left, right| right.0.cmp(&left.0));
+        largest.sort_by_key(|entry| Reverse(entry.0));
         let mut file_types: Vec<_> = self
             .file_types
             .iter()
@@ -386,7 +387,7 @@ impl ScanContext<'_> {
                 item_count: *item_count,
             })
             .collect();
-        file_types.sort_by(|left, right| right.bytes.cmp(&left.bytes));
+        file_types.sort_by_key(|entry| Reverse(entry.bytes));
         let percent = if status == SpaceScanStatus::Completed {
             100
         } else {
@@ -475,20 +476,14 @@ fn walk_dir(
         if context.cooperative_boundary() {
             break;
         }
-        let entry = match entry {
-            Ok(entry) => entry,
-            Err(_) => {
-                context.skipped_items = context.skipped_items.saturating_add(1);
-                continue;
-            }
+        let Ok(entry) = entry else {
+            context.skipped_items = context.skipped_items.saturating_add(1);
+            continue;
         };
         let child = entry.path();
-        let metadata = match fs::symlink_metadata(&child) {
-            Ok(metadata) => metadata,
-            Err(_) => {
-                context.skipped_items = context.skipped_items.saturating_add(1);
-                continue;
-            }
+        let Ok(metadata) = fs::symlink_metadata(&child) else {
+            context.skipped_items = context.skipped_items.saturating_add(1);
+            continue;
         };
         if metadata.file_type().is_symlink() {
             context.skipped_items = context.skipped_items.saturating_add(1);

@@ -21,8 +21,10 @@ pub fn discover_disks() -> Result<Vec<DiskSummary>, DiscoveryError> {
             let id = volume_id(&mount_point);
             let total_bytes = disk.total_space();
             let used_bytes = total_bytes.saturating_sub(disk.available_space());
-            let is_system_volume =
-                paths_refer_to_same_volume(&mount_point, Path::new(&system_root));
+            let is_system_volume = paths_refer_to_same_volume(
+                Path::new(&mount_point),
+                Path::new(&system_root),
+            );
             let is_read_only = disk.is_read_only();
             let health_status = if is_read_only {
                 VolumeHealthStatus::ReadOnly

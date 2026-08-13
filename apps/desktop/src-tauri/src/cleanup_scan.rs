@@ -189,7 +189,7 @@ fn recycle_bin_paths() -> Vec<PathBuf> {
 }
 
 fn build_cache_paths(local_app_data: &Path) -> Vec<PathBuf> {
-    [
+    vec![
         local_app_data.join("npm-cache"),
         local_app_data.join("Yarn/Cache"),
         local_app_data.join("pnpm/store"),

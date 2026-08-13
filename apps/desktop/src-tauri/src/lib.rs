@@ -72,6 +72,13 @@ fn scan_cleanup_preview() -> Result<clarity_core::CleanupPreview, String> {
     cleanup_scan::scan_cleanup_preview().map_err(|error| error.to_string())
 }
 
+/// Creates a fresh immutable cleanup plan without authorizing execution.
+#[tauri::command]
+fn prepare_cleanup_plan() -> Result<clarity_core::CleanupPlan, String> {
+    let preview = cleanup_scan::scan_cleanup_preview().map_err(|error| error.to_string())?;
+    clarity_core::CleanupPlan::from_preview(&preview).map_err(|error| error.to_string())
+}
+
 /// Starts the desktop runtime and registers the minimal command surface.
 ///
 /// # Panics
@@ -82,7 +89,8 @@ pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             get_dashboard_snapshot,
-            scan_cleanup_preview
+            scan_cleanup_preview,
+            prepare_cleanup_plan
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Clarity Disk");

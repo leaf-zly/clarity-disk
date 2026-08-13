@@ -1,6 +1,7 @@
 //! Cross-platform cleanup candidates and scan state.
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::dashboard::SuggestionRisk;
@@ -77,6 +78,74 @@ pub struct CleanupPreview {
     pub total_reclaimable_bytes: u64,
 }
 
+/// Immutable, execution-free cleanup plan generated from one completed scan.
+///
+/// The plan is deliberately a domain artifact only. It does not authorize a
+/// deletion; a future privileged executor must revalidate every snapshot and
+/// require a separate user confirmation token.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CleanupPlan {
+    /// Stable identifier for this plan instance.
+    pub plan_id: String,
+    /// Scan identifier from which the plan was derived.
+    pub scan_id: String,
+    /// Selected candidates copied from the completed preview.
+    pub candidates: Vec<CleanupCandidate>,
+    /// SHA-256 digest of the canonical plan payload.
+    pub plan_digest: String,
+    /// Explicitly false until a separately reviewed executor is implemented.
+    pub execution_authorized: bool,
+}
+
+impl CleanupPlan {
+    /// Builds a deterministic, non-authorizing plan from default-selected items.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the preview is incomplete, contains no selected
+    /// items, or its candidate data cannot be serialized for hashing.
+    pub fn from_preview(preview: &CleanupPreview) -> Result<Self, CleanupPlanError> {
+        if preview.scan.status != ScanStatus::Completed {
+            return Err(CleanupPlanError::PreviewNotCompleted {
+                status: preview.scan.status,
+            });
+        }
+        let candidates: Vec<_> = preview
+            .candidates
+            .iter()
+            .filter(|candidate| candidate.default_selected)
+            .cloned()
+            .collect();
+        if candidates.is_empty() {
+            return Err(CleanupPlanError::NoSelectedCandidates);
+        }
+        let payload = PlanDigestPayload {
+            scan_id: &preview.scan.scan_id,
+            candidates: &candidates,
+        };
+        let encoded = serde_json::to_vec(&payload)
+            .map_err(|error| CleanupPlanError::Serialization(error.to_string()))?;
+        let digest = Sha256::digest(encoded);
+        let plan_digest = digest.iter().map(|byte| format!("{byte:02x}")).collect();
+
+        Ok(Self {
+            plan_id: format!("plan-{}", preview.scan.scan_id),
+            scan_id: preview.scan.scan_id.clone(),
+            candidates,
+            plan_digest,
+            execution_authorized: false,
+        })
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PlanDigestPayload<'a> {
+    scan_id: &'a str,
+    candidates: &'a [CleanupCandidate],
+}
+
 impl CleanupPreview {
     /// Creates a validated completed preview from scan output.
     ///
@@ -122,6 +191,20 @@ pub enum CleanupError {
     /// Candidate sizes exceeded the representable byte range.
     #[error("cleanup candidate bytes overflowed while aggregating")]
     CandidateBytesOverflow,
+}
+
+/// Errors raised while creating a non-authorizing cleanup plan.
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
+pub enum CleanupPlanError {
+    /// Plans may only be derived from completed scans.
+    #[error("cleanup plan requires a completed scan, got {status:?}")]
+    PreviewNotCompleted { status: ScanStatus },
+    /// An empty selection cannot produce an actionable review artifact.
+    #[error("cleanup plan has no selected candidates")]
+    NoSelectedCandidates,
+    /// Candidate data could not be encoded for digesting.
+    #[error("cleanup plan could not be serialized: {0}")]
+    Serialization(String),
 }
 
 #[cfg(test)]
@@ -176,6 +259,40 @@ mod tests {
             CleanupError::PreviewRequiresCompletedScan {
                 status: ScanStatus::Cancelled,
             }
+        );
+    }
+
+    #[test]
+    fn creates_non_authorizing_deterministic_plan() {
+        let preview = CleanupPreview::completed(
+            completed_scan(),
+            vec![candidate(10), {
+                let mut item = candidate(20);
+                item.default_selected = false;
+                item
+            }],
+        )
+        .expect("completed scan should produce a preview");
+
+        let first = super::CleanupPlan::from_preview(&preview).expect("plan should be valid");
+        let second = super::CleanupPlan::from_preview(&preview).expect("plan should be valid");
+
+        assert_eq!(first, second);
+        assert_eq!(first.candidates.len(), 1);
+        assert!(!first.execution_authorized);
+        assert_eq!(first.plan_digest.len(), 64);
+    }
+
+    #[test]
+    fn rejects_empty_selection() {
+        let mut item = candidate(20);
+        item.default_selected = false;
+        let preview = CleanupPreview::completed(completed_scan(), vec![item])
+            .expect("completed scan should produce a preview");
+
+        assert_eq!(
+            super::CleanupPlan::from_preview(&preview),
+            Err(super::CleanupPlanError::NoSelectedCandidates)
         );
     }
 }

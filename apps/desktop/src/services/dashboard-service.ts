@@ -1,7 +1,11 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 
 import { dashboardFixture } from "@/testing/dashboard-fixture";
-import type { CleanupPreview, DashboardSnapshot } from "@/types/dashboard";
+import type {
+  CleanupPlan,
+  CleanupPreview,
+  DashboardSnapshot,
+} from "@/types/dashboard";
 
 /**
  * Loads the dashboard snapshot from the Tauri command layer. Browser-only
@@ -100,5 +104,28 @@ export async function loadCleanupPreview(): Promise<CleanupPreview> {
       },
     ],
     totalReclaimableBytes: 1_679 * 1024 * 1024,
+  };
+}
+
+/**
+ * Creates a fresh immutable cleanup plan for review only. No executor is
+ * called, and the returned plan is explicitly marked unauthorized.
+ *
+ * @returns A non-authorizing plan derived from the latest read-only scan.
+ */
+export async function prepareCleanupPlan(): Promise<CleanupPlan> {
+  if (isTauri()) {
+    return invoke<CleanupPlan>("prepare_cleanup_plan");
+  }
+
+  const preview = await loadCleanupPreview();
+  return {
+    planId: `plan-${preview.scan.scanId}`,
+    scanId: preview.scan.scanId,
+    candidates: preview.candidates.filter(
+      (candidate) => candidate.defaultSelected,
+    ),
+    planDigest: "browser-fixture-plan-digest",
+    executionAuthorized: false,
   };
 }

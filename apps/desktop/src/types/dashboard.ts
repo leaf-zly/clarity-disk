@@ -9,7 +9,6 @@ export type SuggestionRisk = "safe" | "review" | "confirmationRequired";
 /** Lifecycle states emitted by the read-only cleanup scanner. */
 export type ScanStatus =
   "idle" | "discovering" | "scanning" | "completed" | "cancelled" | "failed";
-
 /** Progress and provenance for a cleanup scan. */
 export interface ScanProgress {
   scanId: string;
@@ -18,7 +17,6 @@ export interface ScanProgress {
   skippedItems: number;
   message: string;
 }
-
 /** Read-only cleanup candidate produced by a versioned rule. */
 export interface CleanupCandidate {
   id: string;
@@ -32,21 +30,26 @@ export interface CleanupCandidate {
   recoverable: boolean;
   defaultSelected: boolean;
 }
-
 /** Complete cleanup preview returned by the scanner. */
 export interface CleanupPreview {
   scan: ScanProgress;
   candidates: CleanupCandidate[];
   totalReclaimableBytes: number;
 }
-
+/** Immutable, non-authorizing plan created from the current preview. */
+export interface CleanupPlan {
+  planId: string;
+  scanId: string;
+  candidates: CleanupCandidate[];
+  planDigest: string;
+  executionAuthorized: boolean;
+}
 /** Capacity attributed to a user-facing disk category. */
 export interface DiskCategory {
   kind: DiskCategoryKind;
   label: string;
   bytes: number;
 }
-
 /** Read-only platform metadata for a logical volume. */
 export interface DiskMetadata {
   mountPoint: string;
@@ -58,7 +61,6 @@ export interface DiskMetadata {
   healthStatus: "healthy" | "readOnly" | "warning";
   healthNote: string | null;
 }
-
 /** Capacity and classification data for a logical volume. */
 export interface DiskSummary {
   id: string;
@@ -68,7 +70,6 @@ export interface DiskSummary {
   categories: DiskCategory[];
   metadata: DiskMetadata;
 }
-
 /** Health information returned by the platform health provider. */
 export interface DiskHealth {
   status: string;
@@ -76,13 +77,11 @@ export interface DiskHealth {
   temperatureCelsius: number | null;
   hasWarning: boolean;
 }
-
 /** Low-risk cleanup estimate shown before a detailed scan. */
 export interface CleanupSummary {
   reclaimableBytes: number;
   categoryCount: number;
 }
-
 /** A prioritized maintenance recommendation presented to the user. */
 export interface Suggestion {
   id: string;
@@ -91,7 +90,6 @@ export interface Suggestion {
   risk: SuggestionRisk;
   reclaimableBytes: number;
 }
-
 /** Complete dashboard payload returned by the desktop command layer. */
 export interface DashboardSnapshot {
   disk: DiskSummary;

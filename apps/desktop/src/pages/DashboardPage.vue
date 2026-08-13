@@ -18,8 +18,13 @@ import SuggestionItem from "@/components/SuggestionItem.vue";
 import {
   loadCleanupPreview,
   loadDashboardSnapshot,
+  prepareCleanupPlan,
 } from "@/services/dashboard-service";
-import type { CleanupPreview, DashboardSnapshot } from "@/types/dashboard";
+import type {
+  CleanupPlan,
+  CleanupPreview,
+  DashboardSnapshot,
+} from "@/types/dashboard";
 
 const snapshot = shallowRef<DashboardSnapshot>();
 const loadError = shallowRef<string>();
@@ -27,6 +32,8 @@ const isLoading = shallowRef(true);
 const selectedDiskId = shallowRef<string>();
 const cleanupPreview = shallowRef<CleanupPreview>();
 const isCleanupLoading = shallowRef(false);
+const cleanupPlan = shallowRef<CleanupPlan>();
+const isPreparingPlan = shallowRef(false);
 const selectedDisk = computed(() => {
   if (!snapshot.value) {
     return undefined;
@@ -63,6 +70,16 @@ async function refreshCleanupPreview(): Promise<void> {
     cleanupPreview.value = await loadCleanupPreview();
   } finally {
     isCleanupLoading.value = false;
+  }
+}
+
+/** Creates a review-only plan from a fresh scan; no execution is authorized. */
+async function preparePlan(): Promise<void> {
+  isPreparingPlan.value = true;
+  try {
+    cleanupPlan.value = await prepareCleanupPlan();
+  } finally {
+    isPreparingPlan.value = false;
   }
 }
 
@@ -119,6 +136,9 @@ onMounted(async () => {
         :preview="cleanupPreview"
         :is-loading="isCleanupLoading"
         @request-scan="refreshCleanupPreview"
+        :plan="cleanupPlan"
+        :is-preparing-plan="isPreparingPlan"
+        @prepare-plan="preparePlan"
       />
 
       <div class="section-heading">

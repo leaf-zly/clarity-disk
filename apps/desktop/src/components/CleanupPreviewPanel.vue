@@ -2,18 +2,25 @@
 import { computed } from "vue";
 import { Eye, FolderSearch, Info, ShieldCheck } from "@lucide/vue";
 
-import type { CleanupPreview, SuggestionRisk } from "@/types/dashboard";
+import type {
+  CleanupPlan,
+  CleanupPreview,
+  SuggestionRisk,
+} from "@/types/dashboard";
 import { formatBytes } from "@/utils/format-bytes";
 
 /** Read-only preview data and scan state rendered by the panel. */
 interface Props {
   preview: CleanupPreview;
   isLoading: boolean;
+  plan: CleanupPlan | undefined;
+  isPreparingPlan: boolean;
 }
 
 /** User action emitted when the allow-listed scan should run again. */
 interface Emits {
   "request-scan": [];
+  "prepare-plan": [];
 }
 
 const props = defineProps<Props>();
@@ -49,6 +56,14 @@ function riskLabel(risk: SuggestionRisk): string {
         @click="emit('request-scan')"
       >
         {{ isLoading ? "扫描中" : "重新扫描" }}
+      </button>
+      <button
+        class="plan-button"
+        type="button"
+        :disabled="isPreparingPlan"
+        @click="emit('prepare-plan')"
+      >
+        {{ isPreparingPlan ? "生成中" : "生成安全计划" }}
       </button>
     </div>
 
@@ -97,6 +112,10 @@ function riskLabel(risk: SuggestionRisk): string {
       <span
         >当前阶段只生成清理建议，执行按钮将在安全计划和隔离区完成后开放。</span
       >
+    </div>
+    <div v-if="plan" class="plan-note" role="status">
+      <strong>计划已生成，仅供复核</strong>
+      <span>摘要 {{ plan.planDigest }} · 未授权执行</span>
     </div>
   </section>
 </template>
@@ -148,6 +167,19 @@ function riskLabel(risk: SuggestionRisk): string {
   color: var(--color-blue);
   background: transparent;
   cursor: pointer;
+}
+.plan-button {
+  margin-left: 6px;
+  padding: 7px 11px;
+  border: 0;
+  border-radius: 8px;
+  color: white;
+  background: var(--color-blue);
+  cursor: pointer;
+}
+.plan-button:disabled {
+  cursor: progress;
+  opacity: 0.6;
 }
 .rescan-button:disabled {
   cursor: progress;
@@ -245,6 +277,19 @@ function riskLabel(risk: SuggestionRisk): string {
   border-top: 1px solid var(--color-border);
   color: var(--color-text-secondary);
   font-size: 0.75rem;
+}
+.plan-note {
+  display: grid;
+  gap: 3px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  color: var(--color-text-secondary);
+  background: var(--color-surface-muted);
+  font-size: 0.75rem;
+}
+.plan-note strong {
+  color: var(--color-text-primary);
 }
 @media (max-width: 700px) {
   .preview-summary {

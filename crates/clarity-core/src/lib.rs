@@ -3,7 +3,10 @@
 mod cleanup;
 mod dashboard;
 
-pub use cleanup::{CleanupCandidate, CleanupError, CleanupPreview, ScanProgress, ScanStatus};
+pub use cleanup::{
+    CleanupCandidate, CleanupError, CleanupPlan, CleanupPlanError, CleanupPreview, ScanProgress,
+    ScanStatus,
+};
 pub use dashboard::{
     CleanupSummary, DashboardError, DashboardSnapshot, DiskCategory, DiskCategoryKind, DiskHealth,
     DiskMetadata, DiskSummary, Suggestion, SuggestionRisk, VolumeHealthStatus,

@@ -16,27 +16,18 @@ import DiskVolumeList from "@/components/DiskVolumeList.vue";
 import CleanupPreviewPanel from "@/components/CleanupPreviewPanel.vue";
 import MetricCard from "@/components/MetricCard.vue";
 import SuggestionItem from "@/components/SuggestionItem.vue";
+import { useCleanupWorkflow } from "@/composables/use-cleanup-workflow";
 import { useSpaceScan } from "@/composables/use-space-scan";
 import {
   getDefaultSpaceScanRequest,
-  loadCleanupPreview,
   loadDashboardSnapshot,
-  prepareCleanupPlan,
 } from "@/services/dashboard-service";
-import type {
-  CleanupPlan,
-  CleanupPreview,
-  DashboardSnapshot,
-} from "@/types/dashboard";
+import type { DashboardSnapshot } from "@/types/dashboard";
 
 const snapshot = shallowRef<DashboardSnapshot>();
 const loadError = shallowRef<string>();
 const isLoading = shallowRef(true);
 const selectedDiskId = shallowRef<string>();
-const cleanupPreview = shallowRef<CleanupPreview>();
-const isCleanupLoading = shallowRef(false);
-const cleanupPlan = shallowRef<CleanupPlan>();
-const isPreparingPlan = shallowRef(false);
 const scanRoot = shallowRef("C:\\");
 const scanMaxDepth = shallowRef(8);
 const scanMaxEntries = shallowRef(100_000);
@@ -52,6 +43,23 @@ const {
   cancel: cancelScan,
   refreshHistory: refreshSpaceScanHistory,
 } = useSpaceScan();
+const {
+  preview: cleanupPreview,
+  plan: cleanupPlan,
+  quarantine,
+  auditEvents,
+  selectedIds,
+  selectedBytes,
+  highestRisk,
+  error: cleanupError,
+  isScanning: isCleanupLoading,
+  isPreparingPlan,
+  isPreparingQuarantine,
+  scan: refreshCleanupPreview,
+  setSelected: setCleanupSelected,
+  createPlan: preparePlan,
+  createQuarantineIndex,
+} = useCleanupWorkflow();
 const selectedDisk = computed(() => {
   if (!snapshot.value) {
     return undefined;
@@ -78,26 +86,6 @@ async function refreshDashboard(): Promise<void> {
     loadError.value = "暂时无法读取磁盘状态，请稍后重试。";
   } finally {
     isLoading.value = false;
-  }
-}
-
-/** Loads the read-only cleanup preview independently from dashboard capacity. */
-async function refreshCleanupPreview(): Promise<void> {
-  isCleanupLoading.value = true;
-  try {
-    cleanupPreview.value = await loadCleanupPreview();
-  } finally {
-    isCleanupLoading.value = false;
-  }
-}
-
-/** Creates a review-only plan from a fresh scan; no execution is authorized. */
-async function preparePlan(): Promise<void> {
-  isPreparingPlan.value = true;
-  try {
-    cleanupPlan.value = await prepareCleanupPlan();
-  } finally {
-    isPreparingPlan.value = false;
   }
 }
 
@@ -188,11 +176,20 @@ onMounted(async () => {
       <CleanupPreviewPanel
         v-if="cleanupPreview"
         :preview="cleanupPreview"
+        :selected-ids="selectedIds"
+        :selected-bytes="selectedBytes"
+        :highest-risk="highestRisk"
         :is-loading="isCleanupLoading"
+        :error="cleanupError"
         @request-scan="refreshCleanupPreview"
         :plan="cleanupPlan"
+        :quarantine="quarantine"
+        :audit-events="auditEvents"
         :is-preparing-plan="isPreparingPlan"
+        :is-preparing-quarantine="isPreparingQuarantine"
+        @update-selection="setCleanupSelected"
         @prepare-plan="preparePlan"
+        @prepare-quarantine="createQuarantineIndex"
       />
 
       <SpaceScanPanel

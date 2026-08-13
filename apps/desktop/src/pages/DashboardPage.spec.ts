@@ -12,6 +12,9 @@ vi.mock("@/services/dashboard-service", () => ({
   loadCleanupPreview: vi.fn(),
   loadDashboardSnapshot: vi.fn(),
   prepareCleanupPlan: vi.fn(),
+  prepareQuarantineIndex: vi.fn(),
+  getQuarantineIndex: vi.fn().mockResolvedValue(null),
+  getAuditEvents: vi.fn().mockResolvedValue([]),
   startSpaceScan: vi.fn(),
   getSpaceScan: vi.fn(),
   cancelSpaceScan: vi.fn(),
@@ -40,6 +43,7 @@ describe("DashboardPage", () => {
         sourceVolumeId: "C:",
       },
       candidates: [],
+      ruleStatuses: [],
       totalReclaimableBytes: 0,
     });
   });
@@ -50,7 +54,6 @@ describe("DashboardPage", () => {
     );
     const wrapper = mount(DashboardPage);
     await flushPromises();
-
     expect(wrapper.get("h1").text()).toBe("下午好");
     expect(wrapper.text()).toContain("Windows · 本地磁盘 (C:)");
     expect(wrapper.text()).toContain("40.43 GB");
@@ -67,7 +70,6 @@ describe("DashboardPage", () => {
     );
     const wrapper = mount(DashboardPage);
     await flushPromises();
-
     expect(wrapper.get('[role="alert"]').text()).toContain(
       "暂时无法读取磁盘状态",
     );

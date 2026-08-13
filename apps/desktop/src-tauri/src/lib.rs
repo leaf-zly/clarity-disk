@@ -3,11 +3,16 @@
 use clarity_core::{CleanupSummary, DashboardSnapshot, DiskHealth, Suggestion, SuggestionRisk};
 use std::sync::OnceLock;
 
+mod audit_store;
 mod cleanup_scan;
+mod cleanup_workflow;
 mod disk_discovery;
+mod quarantine_store;
 mod space_scan;
+mod state_store;
 
 static SPACE_SCANS: OnceLock<space_scan::SpaceScanManager> = OnceLock::new();
+static CLEANUP_WORKFLOW: OnceLock<cleanup_workflow::CleanupWorkflow> = OnceLock::new();
 
 const GIB: u64 = 1024 * 1024 * 1024;
 const MIB: u64 = 1024 * 1024;
@@ -70,17 +75,46 @@ fn get_dashboard_snapshot() -> Result<DashboardSnapshot, String> {
     })
 }
 
-/// Produces a read-only browser-cache cleanup preview.
+/// Produces a read-only cleanup preview from versioned allow-listed rules.
 #[tauri::command]
 fn scan_cleanup_preview() -> Result<clarity_core::CleanupPreview, String> {
-    cleanup_scan::scan_cleanup_preview().map_err(|error| error.to_string())
+    CLEANUP_WORKFLOW
+        .get_or_init(cleanup_workflow::CleanupWorkflow::default)
+        .scan()
 }
 
-/// Creates a fresh immutable cleanup plan without authorizing execution.
+/// Creates an immutable plan from IDs in the latest preview without authorizing execution.
 #[tauri::command]
-fn prepare_cleanup_plan() -> Result<clarity_core::CleanupPlan, String> {
-    let preview = cleanup_scan::scan_cleanup_preview().map_err(|error| error.to_string())?;
-    clarity_core::CleanupPlan::from_preview(&preview).map_err(|error| error.to_string())
+fn prepare_cleanup_plan(
+    request: clarity_core::PrepareCleanupPlanRequest,
+) -> Result<clarity_core::CleanupPlan, String> {
+    CLEANUP_WORKFLOW
+        .get_or_init(cleanup_workflow::CleanupWorkflow::default)
+        .prepare_plan(&request)
+}
+
+/// Creates a persisted quarantine index preview without moving any file.
+#[tauri::command]
+fn prepare_quarantine_index(plan_id: &str) -> Result<clarity_core::QuarantineIndex, String> {
+    CLEANUP_WORKFLOW
+        .get_or_init(cleanup_workflow::CleanupWorkflow::default)
+        .prepare_quarantine(plan_id)
+}
+
+/// Returns the latest preview-only quarantine index, if present.
+#[tauri::command]
+fn get_quarantine_index() -> Option<clarity_core::QuarantineIndex> {
+    CLEANUP_WORKFLOW
+        .get_or_init(cleanup_workflow::CleanupWorkflow::default)
+        .quarantine_index()
+}
+
+/// Returns newest privacy-preserving cleanup audit events.
+#[tauri::command]
+fn get_audit_events() -> Vec<clarity_core::AuditEvent> {
+    CLEANUP_WORKFLOW
+        .get_or_init(cleanup_workflow::CleanupWorkflow::default)
+        .audit_events()
 }
 
 /// Starts a bounded, read-only directory scan.
@@ -158,6 +192,9 @@ pub fn run() {
             get_dashboard_snapshot,
             scan_cleanup_preview,
             prepare_cleanup_plan,
+            prepare_quarantine_index,
+            get_quarantine_index,
+            get_audit_events,
             start_space_scan,
             get_space_scan,
             cancel_space_scan,

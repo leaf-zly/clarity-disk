@@ -6,7 +6,9 @@ mod space_scan;
 
 pub use cleanup::{
     AuditEvent, AuditEventKind, CleanupCandidate, CleanupError, CleanupPlan, CleanupPlanError,
-    CleanupPreview, ScanProgress, ScanStatus,
+    CleanupPreview, CleanupRuleAvailability, CleanupRuleStatus, PrepareCleanupPlanRequest,
+    QuarantineEntry, QuarantineEntryStatus, QuarantineError, QuarantineIndex, RecoveryStrategy,
+    ScanProgress, ScanStatus,
 };
 pub use dashboard::{
     CleanupSummary, DashboardError, DashboardSnapshot, DiskCategory, DiskCategoryKind, DiskHealth,

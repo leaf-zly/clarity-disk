@@ -1,4 +1,4 @@
-//! Read-only cleanup rules for allow-listed browser cache locations.
+//! Read-only cleanup rules for strictly allow-listed Windows locations.
 
 use std::fmt::Write;
 use std::fs;
@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use clarity_core::{
-    CleanupCandidate, CleanupError, CleanupPreview, ScanProgress, ScanStatus, SuggestionRisk,
+    CleanupCandidate, CleanupError, CleanupPreview, CleanupRuleAvailability, CleanupRuleStatus,
+    RecoveryStrategy, ScanProgress, ScanStatus, SuggestionRisk,
 };
 use sha2::{Digest, Sha256};
 
@@ -15,14 +16,21 @@ const THUMBNAIL_CACHE_RULE_ID: &str = "thumbnail-cache.v1";
 const USER_TEMP_RULE_ID: &str = "user-temp.v1";
 const RECYCLE_BIN_RULE_ID: &str = "recycle-bin.v1";
 const BUILD_CACHE_RULE_ID: &str = "build-cache.v1";
+const WINDOWS_UPDATE_CACHE_RULE_ID: &str = "windows-update-download-cache.v1";
 
 struct CleanupRule {
     id: &'static str,
+    version: &'static str,
     title: &'static str,
     description: &'static str,
+    evidence: &'static str,
     paths: Vec<PathBuf>,
+    unavailable_reason: Option<&'static str>,
     risk: SuggestionRisk,
     recoverable: bool,
+    requires_admin: bool,
+    recovery_strategy: RecoveryStrategy,
+    quarantine_eligible: bool,
     default_selected: bool,
 }
 
@@ -32,11 +40,16 @@ struct TreeMeasurement {
     metadata_digest: String,
 }
 
-/// Scans all currently enabled low-risk cleanup roots without deleting,
-/// opening, or modifying files.
+/// Scans every enabled cleanup rule without deleting, moving, or opening files.
+///
+/// # Errors
+///
+/// Returns an error only for arithmetic overflow or an invalid domain result;
+/// inaccessible allow-listed roots are represented as rule statuses instead.
 pub fn scan_cleanup_preview() -> Result<CleanupPreview, CleanupScanError> {
+    let now = current_unix_ms();
     let scan = ScanProgress {
-        scan_id: format!("scan-{}", std::process::id()),
+        scan_id: format!("cleanup-{}-{now}", std::process::id()),
         status: ScanStatus::Scanning,
         scanned_items: 0,
         skipped_items: 0,
@@ -44,57 +57,93 @@ pub fn scan_cleanup_preview() -> Result<CleanupPreview, CleanupScanError> {
         source_volume_id: std::env::var("SystemDrive").ok(),
     };
     let mut candidates = Vec::new();
+    let mut rule_statuses = Vec::new();
     let mut scanned_items = 0_u64;
     let mut skipped_items = 0_u64;
 
     for rule in cleanup_rules() {
+        if rule.paths.is_empty() {
+            rule_statuses.push(rule_status(
+                &rule,
+                CleanupRuleAvailability::Unavailable,
+                rule.unavailable_reason,
+            ));
+            continue;
+        }
         let mut bytes = 0_u64;
         let mut items = 0_u64;
         let mut metadata_hasher = Sha256::new();
-        let mut observed_at_unix_ms = None;
-        for path in &rule.paths {
-            if !path.exists() {
-                continue;
-            }
-            let measurement = match measure_tree(path, &mut scanned_items, &mut skipped_items) {
-                Ok(result) => result,
-                // A locked or concurrently removed cache must not make the whole
-                // read-only preview unusable; retain the skip count as provenance.
+        let mut readable_root = false;
+        let mut inaccessible_root = false;
+        let existing_roots: Vec<_> = rule.paths.iter().filter(|path| path.exists()).collect();
+
+        for path in &existing_roots {
+            match measure_tree(path, &mut scanned_items, &mut skipped_items) {
+                Ok(measurement) => {
+                    readable_root = true;
+                    bytes = bytes
+                        .checked_add(measurement.bytes)
+                        .ok_or(CleanupScanError::SizeOverflow)?;
+                    items = items.saturating_add(measurement.items);
+                    metadata_hasher.update(measurement.metadata_digest.as_bytes());
+                }
+                // Locked and access-denied roots are evidence that the rule was
+                // evaluated but unavailable; they never trigger elevation here.
                 Err(CleanupScanError::Read { .. }) => {
+                    inaccessible_root = true;
                     skipped_items = skipped_items.saturating_add(1);
-                    continue;
                 }
                 Err(error) => return Err(error),
-            };
-            bytes = bytes
-                .checked_add(measurement.bytes)
-                .ok_or(CleanupScanError::SizeOverflow)?;
-            items = items.saturating_add(measurement.items);
-            metadata_hasher.update(measurement.metadata_digest.as_bytes());
-            observed_at_unix_ms = Some(current_unix_ms());
-        }
-        if bytes == 0 {
-            continue;
+            }
         }
 
-        candidates.push(CleanupCandidate {
-            id: rule.id.to_owned(),
-            rule_id: rule.id.to_owned(),
-            title: rule.title.to_owned(),
-            description: rule.description.to_owned(),
-            path: rule
-                .paths
-                .first()
+        if bytes > 0 {
+            let paths = existing_roots
+                .iter()
                 .map(|path| path.to_string_lossy().into_owned())
-                .unwrap_or_default(),
-            bytes,
-            item_count: items,
-            risk: rule.risk,
-            recoverable: rule.recoverable,
-            default_selected: rule.default_selected,
-            metadata_digest: format_digest(metadata_hasher.finalize()),
-            observed_at_unix_ms,
-        });
+                .collect::<Vec<_>>();
+            candidates.push(CleanupCandidate {
+                id: rule.id.to_owned(),
+                rule_id: rule.id.to_owned(),
+                rule_version: rule.version.to_owned(),
+                title: rule.title.to_owned(),
+                description: rule.description.to_owned(),
+                path: paths.join("；"),
+                evidence: vec![
+                    rule.evidence.to_owned(),
+                    format!("只读统计到 {items} 个项目，共 {bytes} 字节"),
+                ],
+                bytes,
+                item_count: items,
+                risk: rule.risk,
+                recoverable: rule.recoverable,
+                requires_admin: rule.requires_admin,
+                recovery_strategy: rule.recovery_strategy,
+                quarantine_eligible: rule.quarantine_eligible,
+                default_selected: rule.default_selected,
+                metadata_digest: format_digest(metadata_hasher.finalize()),
+                observed_at_unix_ms: Some(now),
+            });
+            rule_statuses.push(rule_status(&rule, CleanupRuleAvailability::Available, None));
+        } else {
+            let (availability, reason) = if inaccessible_root && !readable_root {
+                (
+                    CleanupRuleAvailability::Unavailable,
+                    Some("当前权限无法读取该规则的固定目录，未执行任何修改"),
+                )
+            } else if existing_roots.is_empty() {
+                (
+                    CleanupRuleAvailability::Unavailable,
+                    Some("固定允许目录不存在，已安全跳过"),
+                )
+            } else {
+                (
+                    CleanupRuleAvailability::Empty,
+                    Some("固定允许目录中未发现可预览内容"),
+                )
+            };
+            rule_statuses.push(rule_status(&rule, availability, reason));
+        }
     }
 
     let completed_scan = ScanProgress {
@@ -104,65 +153,134 @@ pub fn scan_cleanup_preview() -> Result<CleanupPreview, CleanupScanError> {
         message: "清理扫描完成（仅预览）".to_owned(),
         ..scan
     };
+    CleanupPreview::completed(completed_scan, candidates, rule_statuses)
+        .map_err(CleanupScanError::Preview)
+}
 
-    CleanupPreview::completed(completed_scan, candidates).map_err(CleanupScanError::Preview)
+fn rule_status(
+    rule: &CleanupRule,
+    availability: CleanupRuleAvailability,
+    reason: Option<&str>,
+) -> CleanupRuleStatus {
+    CleanupRuleStatus {
+        rule_id: rule.id.to_owned(),
+        title: rule.title.to_owned(),
+        availability,
+        reason: reason.map(str::to_owned),
+        requires_admin: rule.requires_admin,
+        risk: rule.risk,
+    }
 }
 
 fn cleanup_rules() -> Vec<CleanupRule> {
-    let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") else {
-        return Vec::new();
+    let local_app_data = std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
+    let system_root = std::env::var_os("SystemRoot").map(PathBuf::from);
+    let local_missing = local_app_data.is_none();
+    let system_missing = system_root.is_none();
+    let local_paths = |builder: fn(&Path) -> Vec<PathBuf>| {
+        local_app_data.as_deref().map(builder).unwrap_or_default()
     };
-    let local_app_data = PathBuf::from(local_app_data);
     vec![
         CleanupRule {
             id: BROWSER_CACHE_RULE_ID,
+            version: "1",
             title: "浏览器缓存",
-            description: "Chrome、Edge 与 Brave 可重新生成的缓存内容，不会直接删除文件",
-            paths: vec![
-                local_app_data.join("Google/Chrome/User Data/Default/Cache"),
-                local_app_data.join("Microsoft/Edge/User Data/Default/Cache"),
-                local_app_data.join("BraveSoftware/Brave-Browser/User Data/Default/Cache"),
-            ],
+            description: "Chrome、Edge 与 Brave 可重新生成的缓存内容",
+            evidence: "命中受支持浏览器的固定 Cache 目录",
+            paths: local_paths(browser_cache_paths),
+            unavailable_reason: local_missing.then_some("LOCALAPPDATA 不可用，规则已安全跳过"),
             risk: SuggestionRisk::Safe,
             recoverable: true,
+            requires_admin: false,
+            recovery_strategy: RecoveryStrategy::Regenerate,
+            quarantine_eligible: false,
             default_selected: true,
         },
         CleanupRule {
             id: THUMBNAIL_CACHE_RULE_ID,
+            version: "1",
             title: "缩略图缓存",
-            description: "Windows 可重新生成的缩略图数据库，不会直接删除文件",
-            paths: thumbnail_cache_paths(&local_app_data),
+            description: "Windows 可重新生成的缩略图数据库",
+            evidence: "命中 Windows Explorer 的固定缩略图数据库名称",
+            paths: local_paths(thumbnail_cache_paths),
+            unavailable_reason: local_missing.then_some("LOCALAPPDATA 不可用，规则已安全跳过"),
             risk: SuggestionRisk::Safe,
             recoverable: true,
+            requires_admin: false,
+            recovery_strategy: RecoveryStrategy::Regenerate,
+            quarantine_eligible: false,
             default_selected: true,
         },
         CleanupRule {
             id: USER_TEMP_RULE_ID,
+            version: "1",
             title: "用户临时文件",
-            description: "应用运行产生的临时内容，正在使用的项目可能会被跳过",
+            description: "应用产生的临时内容，正在使用的项目会被跳过",
+            evidence: "命中当前用户 TEMP/TMP 的操作系统环境目录",
             paths: temp_paths(),
+            unavailable_reason: Some("TEMP 与 TMP 均不可用，规则已安全跳过"),
             risk: SuggestionRisk::Review,
             recoverable: true,
+            requires_admin: false,
+            recovery_strategy: RecoveryStrategy::Quarantine,
+            quarantine_eligible: true,
             default_selected: false,
         },
         CleanupRule {
             id: RECYCLE_BIN_RULE_ID,
+            version: "1",
             title: "回收站",
-            description: "已移入 Windows 回收站的项目，永久清空前仍可恢复",
+            description: "已移入 Windows 回收站的内容，永久清空后不可恢复",
+            evidence: "命中系统卷固定 $Recycle.Bin 目录",
             paths: recycle_bin_paths(),
+            unavailable_reason: Some("SystemDrive 不可用，规则已安全跳过"),
             risk: SuggestionRisk::Review,
             recoverable: true,
+            requires_admin: false,
+            recovery_strategy: RecoveryStrategy::WindowsManaged,
+            quarantine_eligible: false,
             default_selected: false,
         },
         CleanupRule {
             id: BUILD_CACHE_RULE_ID,
+            version: "1",
             title: "应用构建缓存",
             description: "包管理器和开发工具可重新生成的缓存，首次构建可能变慢",
-            paths: build_cache_paths(&local_app_data),
+            evidence: "命中受支持开发工具的固定本机缓存目录",
+            paths: local_paths(build_cache_paths),
+            unavailable_reason: local_missing.then_some("LOCALAPPDATA 不可用，规则已安全跳过"),
             risk: SuggestionRisk::Review,
             recoverable: true,
+            requires_admin: false,
+            recovery_strategy: RecoveryStrategy::Regenerate,
+            quarantine_eligible: false,
             default_selected: false,
         },
+        CleanupRule {
+            id: WINDOWS_UPDATE_CACHE_RULE_ID,
+            version: "1",
+            title: "Windows 更新下载缓存",
+            description: "Windows Update 已下载的安装缓存；本阶段仅统计，不停止服务、不删除",
+            evidence: "仅命中 SystemRoot\\SoftwareDistribution\\Download 固定目录",
+            paths: system_root
+                .map(|root| vec![root.join("SoftwareDistribution/Download")])
+                .unwrap_or_default(),
+            unavailable_reason: system_missing.then_some("SystemRoot 不可用，规则已安全跳过"),
+            risk: SuggestionRisk::ConfirmationRequired,
+            recoverable: true,
+            requires_admin: true,
+            recovery_strategy: RecoveryStrategy::WindowsManaged,
+            quarantine_eligible: false,
+            default_selected: false,
+        },
+    ]
+}
+
+fn browser_cache_paths(local_app_data: &Path) -> Vec<PathBuf> {
+    vec![
+        local_app_data.join("Google/Chrome/User Data/Default/Cache"),
+        local_app_data.join("Microsoft/Edge/User Data/Default/Cache"),
+        local_app_data.join("BraveSoftware/Brave-Browser/User Data/Default/Cache"),
     ]
 }
 
@@ -183,10 +301,9 @@ fn temp_paths() -> Vec<PathBuf> {
 }
 
 fn recycle_bin_paths() -> Vec<PathBuf> {
-    let Some(system_drive) = std::env::var_os("SystemDrive") else {
-        return Vec::new();
-    };
-    vec![PathBuf::from(system_drive).join("$Recycle.Bin")]
+    std::env::var_os("SystemDrive")
+        .map(|drive| vec![PathBuf::from(drive).join("$Recycle.Bin")])
+        .unwrap_or_default()
 }
 
 fn build_cache_paths(local_app_data: &Path) -> Vec<PathBuf> {
@@ -203,17 +320,15 @@ fn measure_tree(
     scanned_items: &mut u64,
     skipped_items: &mut u64,
 ) -> Result<TreeMeasurement, CleanupScanError> {
-    let metadata = fs::symlink_metadata(root).map_err(|error| CleanupScanError::Read {
+    let metadata = fs::symlink_metadata(root).map_err(|source| CleanupScanError::Read {
         path: root.to_path_buf(),
-        source: error,
+        source,
     })?;
-    if metadata.file_type().is_symlink() {
+    // Reparse-like indirection is never traversed. On supported platforms,
+    // symlink metadata exposes the unsafe boundary without opening the target.
+    if is_unsafe_indirection(&metadata) {
         *skipped_items = skipped_items.saturating_add(1);
-        return Ok(TreeMeasurement {
-            bytes: 0,
-            items: 0,
-            metadata_digest: String::new(),
-        });
+        return Ok(empty_measurement());
     }
     if metadata.is_file() {
         *scanned_items = scanned_items.saturating_add(1);
@@ -236,19 +351,15 @@ fn measure_tree(
     }
     if !metadata.is_dir() {
         *skipped_items = skipped_items.saturating_add(1);
-        return Ok(TreeMeasurement {
-            bytes: 0,
-            items: 0,
-            metadata_digest: String::new(),
-        });
+        return Ok(empty_measurement());
     }
 
     let mut total_bytes = 0_u64;
     let mut total_items = 0_u64;
     let mut hasher = Sha256::new();
-    let entries = fs::read_dir(root).map_err(|error| CleanupScanError::Read {
+    let entries = fs::read_dir(root).map_err(|source| CleanupScanError::Read {
         path: root.to_path_buf(),
-        source: error,
+        source,
     })?;
     for entry in entries {
         let Ok(entry) = entry else {
@@ -281,6 +392,31 @@ fn measure_tree(
     })
 }
 
+fn empty_measurement() -> TreeMeasurement {
+    TreeMeasurement {
+        bytes: 0,
+        items: 0,
+        metadata_digest: String::new(),
+    }
+}
+
+fn is_unsafe_indirection(metadata: &fs::Metadata) -> bool {
+    metadata.file_type().is_symlink() || is_platform_reparse_point(metadata)
+}
+
+#[cfg(windows)]
+fn is_platform_reparse_point(metadata: &fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400;
+    metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+}
+
+#[cfg(not(windows))]
+fn is_platform_reparse_point(_metadata: &fs::Metadata) -> bool {
+    false
+}
+
 fn format_digest(digest: impl AsRef<[u8]>) -> String {
     digest
         .as_ref()
@@ -306,7 +442,7 @@ fn is_allowed_path(root: &Path, path: &Path) -> bool {
 /// Errors produced while measuring allow-listed cache roots.
 #[derive(Debug, thiserror::Error)]
 pub enum CleanupScanError {
-    /// An allow-listed path could not be read; the candidate is omitted.
+    /// An allow-listed path could not be read; its rule records an unavailable state.
     #[error("could not read cleanup path {path}: {source}")]
     Read {
         /// Path that produced the error.
@@ -327,7 +463,8 @@ mod tests {
     use std::fs;
     use std::path::Path;
 
-    use super::{is_allowed_path, measure_tree};
+    use super::{WINDOWS_UPDATE_CACHE_RULE_ID, cleanup_rules, is_allowed_path, measure_tree};
+    use clarity_core::SuggestionRisk;
 
     fn test_root(name: &str) -> std::path::PathBuf {
         let root = std::env::temp_dir().join(format!(
@@ -345,16 +482,12 @@ mod tests {
         fs::write(root.join("one.tmp"), b"1234").expect("file should be written");
         fs::create_dir(root.join("nested")).expect("nested directory should be created");
         fs::write(root.join("nested/two.tmp"), b"12").expect("file should be written");
-
         let mut scanned = 0;
         let mut skipped = 0;
         let result =
             measure_tree(&root, &mut scanned, &mut skipped).expect("test tree should be readable");
-
         assert_eq!(result.bytes, 6);
         assert_eq!(result.items, 2);
-        assert_eq!(scanned, 2);
-        assert_eq!(skipped, 0);
         assert_eq!(
             fs::read(root.join("one.tmp")).expect("file remains"),
             b"1234"
@@ -372,25 +505,19 @@ mod tests {
         ));
     }
 
-    #[cfg(unix)]
     #[test]
-    fn skips_symbolic_links() {
-        use std::os::unix::fs::symlink;
-
-        let root = test_root("symlink");
-        let target = root.join("target.tmp");
-        fs::write(&target, b"target").expect("target should be written");
-        symlink(&target, root.join("link.tmp")).expect("symlink should be created");
-
-        let mut scanned = 0;
-        let mut skipped = 0;
-        let result = measure_tree(&root, &mut scanned, &mut skipped)
-            .expect("symlink should be skipped safely");
-
-        assert_eq!(result.bytes, 6);
-        assert_eq!(result.items, 1);
-        assert_eq!(scanned, 1);
-        assert_eq!(skipped, 1);
-        let _ = fs::remove_dir_all(root);
+    fn windows_update_rule_is_privileged_confirmation_only() {
+        let rule = cleanup_rules()
+            .into_iter()
+            .find(|rule| rule.id == WINDOWS_UPDATE_CACHE_RULE_ID)
+            .expect("Windows Update rule should exist");
+        assert_eq!(rule.risk, SuggestionRisk::ConfirmationRequired);
+        assert!(rule.requires_admin);
+        assert!(!rule.default_selected);
+        assert!(!rule.quarantine_eligible);
+        assert!(rule.paths.len() <= 1);
+        if let Some(path) = rule.paths.first() {
+            assert!(path.ends_with("SoftwareDistribution/Download"));
+        }
     }
 }

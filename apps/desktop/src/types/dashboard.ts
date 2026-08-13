@@ -15,26 +15,51 @@ export interface ScanProgress {
   message: string;
   sourceVolumeId: string | null;
 }
+/** Recovery behavior a future cleanup executor must preserve. */
+export type RecoveryStrategy =
+  "regenerate" | "quarantine" | "windowsManaged" | "none";
 /** Read-only cleanup candidate produced by a versioned rule. */
 export interface CleanupCandidate {
   id: string;
   ruleId: string;
+  ruleVersion: string;
   title: string;
   description: string;
   path: string;
+  evidence: string[];
   bytes: number;
   itemCount: number;
   risk: SuggestionRisk;
   recoverable: boolean;
+  requiresAdmin: boolean;
+  recoveryStrategy: RecoveryStrategy;
+  quarantineEligible: boolean;
   defaultSelected: boolean;
   metadataDigest: string;
   observedAtUnixMs: number | null;
+}
+/** Availability state for a rule evaluated during a completed scan. */
+export type CleanupRuleAvailability = "available" | "empty" | "unavailable";
+/** Result for every enabled cleanup rule, including rules with no candidate. */
+export interface CleanupRuleStatus {
+  ruleId: string;
+  title: string;
+  availability: CleanupRuleAvailability;
+  reason: string | null;
+  requiresAdmin: boolean;
+  risk: SuggestionRisk;
 }
 /** Complete cleanup preview returned by the scanner. */
 export interface CleanupPreview {
   scan: ScanProgress;
   candidates: CleanupCandidate[];
+  ruleStatuses: CleanupRuleStatus[];
   totalReclaimableBytes: number;
+}
+/** Candidate identity selection used to build a plan from one exact scan. */
+export interface PrepareCleanupPlanRequest {
+  scanId: string;
+  candidateIds: string[];
 }
 /** Immutable, non-authorizing plan created from the current preview. */
 export interface CleanupPlan {
@@ -46,6 +71,36 @@ export interface CleanupPlan {
   createdAtUnixMs: number;
   expiresAtUnixMs: number;
   sourceVolumeId: string | null;
+}
+/** Privacy-preserving local cleanup audit event. */
+export interface AuditEvent {
+  eventId: string;
+  kind:
+    "scanCompleted" | "planCreated" | "planRejected" | "quarantineIndexCreated";
+  subjectId: string;
+  occurredAtUnixMs: number;
+  reason: string | null;
+  candidateCount: number;
+  totalBytes: number;
+  ruleIds: string[];
+}
+/** Preview-only quarantine entry copied from an immutable cleanup plan. */
+export interface QuarantineEntry {
+  candidateId: string;
+  ruleId: string;
+  originalPath: string;
+  bytes: number;
+  metadataDigest: string;
+  status: "previewOnly";
+}
+/** Persisted quarantine preview; filesMoved is false until an executor exists. */
+export interface QuarantineIndex {
+  indexId: string;
+  planId: string;
+  createdAtUnixMs: number;
+  entries: QuarantineEntry[];
+  filesMoved: boolean;
+  totalBytes: number;
 }
 /** Lifecycle states for a bounded read-only space scan. */
 export type SpaceScanStatus =

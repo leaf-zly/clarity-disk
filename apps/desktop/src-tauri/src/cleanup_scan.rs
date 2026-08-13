@@ -18,10 +18,10 @@ const RECYCLE_BIN_RULE_ID: &str = "recycle-bin.v1";
 const BUILD_CACHE_RULE_ID: &str = "build-cache.v1";
 const WINDOWS_UPDATE_CACHE_RULE_ID: &str = "windows-update-download-cache.v1";
 
+// Rule definitions intentionally combine independent policy dimensions;
+// splitting them would make every rule constructor harder to audit.
+#[allow(clippy::struct_excessive_bools)]
 struct CleanupRule {
-    // Rule definitions intentionally combine independent policy dimensions;
-    // splitting them would make every rule constructor harder to audit.
-    #[allow(clippy::struct_excessive_bools)]
     id: &'static str,
     version: &'static str,
     title: &'static str,

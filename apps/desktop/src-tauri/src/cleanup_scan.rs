@@ -19,6 +19,9 @@ const BUILD_CACHE_RULE_ID: &str = "build-cache.v1";
 const WINDOWS_UPDATE_CACHE_RULE_ID: &str = "windows-update-download-cache.v1";
 
 struct CleanupRule {
+    // Rule definitions intentionally combine independent policy dimensions;
+    // splitting them would make every rule constructor harder to audit.
+    #[allow(clippy::struct_excessive_bools)]
     id: &'static str,
     version: &'static str,
     title: &'static str,
@@ -46,6 +49,7 @@ struct TreeMeasurement {
 ///
 /// Returns an error only for arithmetic overflow or an invalid domain result;
 /// inaccessible allow-listed roots are represented as rule statuses instead.
+#[allow(clippy::too_many_lines)]
 pub fn scan_cleanup_preview() -> Result<CleanupPreview, CleanupScanError> {
     let now = current_unix_ms();
     let scan = ScanProgress {
@@ -172,6 +176,7 @@ fn rule_status(
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn cleanup_rules() -> Vec<CleanupRule> {
     let local_app_data = std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
     let system_root = std::env::var_os("SystemRoot").map(PathBuf::from);

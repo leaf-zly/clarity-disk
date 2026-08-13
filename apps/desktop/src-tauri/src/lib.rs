@@ -85,6 +85,7 @@ fn scan_cleanup_preview() -> Result<clarity_core::CleanupPreview, String> {
 
 /// Creates an immutable plan from IDs in the latest preview without authorizing execution.
 #[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
 fn prepare_cleanup_plan(
     request: clarity_core::PrepareCleanupPlanRequest,
 ) -> Result<clarity_core::CleanupPlan, String> {

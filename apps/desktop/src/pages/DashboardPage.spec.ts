@@ -2,15 +2,30 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { describe, expect, it, vi } from "vitest";
 
 import DashboardPage from "@/pages/DashboardPage.vue";
-import { loadDashboardSnapshot } from "@/services/dashboard-service";
+import {
+  loadCleanupPreview,
+  loadDashboardSnapshot,
+} from "@/services/dashboard-service";
 import { dashboardFixture } from "@/testing/dashboard-fixture";
 
 vi.mock("@/services/dashboard-service", () => ({
+  loadCleanupPreview: vi.fn(),
   loadDashboardSnapshot: vi.fn(),
 }));
 
 describe("DashboardPage", () => {
   it("renders disk capacity and recommendations returned by the service", async () => {
+    vi.mocked(loadCleanupPreview).mockResolvedValue({
+      scan: {
+        scanId: "test",
+        status: "completed",
+        scannedItems: 1,
+        skippedItems: 0,
+        message: "扫描完成",
+      },
+      candidates: [],
+      totalReclaimableBytes: 0,
+    });
     vi.mocked(loadDashboardSnapshot).mockResolvedValue(
       structuredClone(dashboardFixture),
     );
@@ -28,6 +43,17 @@ describe("DashboardPage", () => {
   });
 
   it("offers a retry when disk discovery fails", async () => {
+    vi.mocked(loadCleanupPreview).mockResolvedValue({
+      scan: {
+        scanId: "test",
+        status: "completed",
+        scannedItems: 0,
+        skippedItems: 0,
+        message: "扫描完成",
+      },
+      candidates: [],
+      totalReclaimableBytes: 0,
+    });
     vi.mocked(loadDashboardSnapshot).mockRejectedValue(
       new Error("disk discovery failed"),
     );

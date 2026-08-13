@@ -6,6 +6,39 @@ export type DiskCategoryKind =
 
 /** Risk levels used to control default selection and confirmation behavior. */
 export type SuggestionRisk = "safe" | "review" | "confirmationRequired";
+/** Lifecycle states emitted by the read-only cleanup scanner. */
+export type ScanStatus =
+  "idle" | "discovering" | "scanning" | "completed" | "cancelled" | "failed";
+
+/** Progress and provenance for a cleanup scan. */
+export interface ScanProgress {
+  scanId: string;
+  status: ScanStatus;
+  scannedItems: number;
+  skippedItems: number;
+  message: string;
+}
+
+/** Read-only cleanup candidate produced by a versioned rule. */
+export interface CleanupCandidate {
+  id: string;
+  ruleId: string;
+  title: string;
+  description: string;
+  path: string;
+  bytes: number;
+  itemCount: number;
+  risk: SuggestionRisk;
+  recoverable: boolean;
+  defaultSelected: boolean;
+}
+
+/** Complete cleanup preview returned by the scanner. */
+export interface CleanupPreview {
+  scan: ScanProgress;
+  candidates: CleanupCandidate[];
+  totalReclaimableBytes: number;
+}
 
 /** Capacity attributed to a user-facing disk category. */
 export interface DiskCategory {

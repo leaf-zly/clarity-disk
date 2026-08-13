@@ -12,15 +12,21 @@ import {
 
 import DiskUsageCard from "@/components/DiskUsageCard.vue";
 import DiskVolumeList from "@/components/DiskVolumeList.vue";
+import CleanupPreviewPanel from "@/components/CleanupPreviewPanel.vue";
 import MetricCard from "@/components/MetricCard.vue";
 import SuggestionItem from "@/components/SuggestionItem.vue";
-import { loadDashboardSnapshot } from "@/services/dashboard-service";
-import type { DashboardSnapshot } from "@/types/dashboard";
+import {
+  loadCleanupPreview,
+  loadDashboardSnapshot,
+} from "@/services/dashboard-service";
+import type { CleanupPreview, DashboardSnapshot } from "@/types/dashboard";
 
 const snapshot = shallowRef<DashboardSnapshot>();
 const loadError = shallowRef<string>();
 const isLoading = shallowRef(true);
 const selectedDiskId = shallowRef<string>();
+const cleanupPreview = shallowRef<CleanupPreview>();
+const isCleanupLoading = shallowRef(false);
 const selectedDisk = computed(() => {
   if (!snapshot.value) {
     return undefined;
@@ -50,7 +56,20 @@ async function refreshDashboard(): Promise<void> {
   }
 }
 
-onMounted(refreshDashboard);
+/** Loads the read-only cleanup preview independently from dashboard capacity. */
+async function refreshCleanupPreview(): Promise<void> {
+  isCleanupLoading.value = true;
+  try {
+    cleanupPreview.value = await loadCleanupPreview();
+  } finally {
+    isCleanupLoading.value = false;
+  }
+}
+
+onMounted(async () => {
+  await refreshDashboard();
+  await refreshCleanupPreview();
+});
 </script>
 
 <template>
@@ -93,6 +112,13 @@ onMounted(refreshDashboard);
         :disks="snapshot.disks"
         :active-disk-id="selectedDiskId ?? snapshot.disk.id"
         @select-disk="(disk) => (selectedDiskId = disk.id)"
+      />
+
+      <CleanupPreviewPanel
+        v-if="cleanupPreview"
+        :preview="cleanupPreview"
+        :is-loading="isCleanupLoading"
+        @request-scan="refreshCleanupPreview"
       />
 
       <div class="section-heading">

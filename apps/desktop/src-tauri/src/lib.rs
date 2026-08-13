@@ -2,6 +2,7 @@
 
 use clarity_core::{CleanupSummary, DashboardSnapshot, DiskHealth, Suggestion, SuggestionRisk};
 
+mod cleanup_scan;
 mod disk_discovery;
 
 const GIB: u64 = 1024 * 1024 * 1024;
@@ -65,6 +66,12 @@ fn get_dashboard_snapshot() -> Result<DashboardSnapshot, String> {
     })
 }
 
+/// Produces a read-only browser-cache cleanup preview.
+#[tauri::command]
+fn scan_cleanup_preview() -> Result<clarity_core::CleanupPreview, String> {
+    cleanup_scan::scan_browser_caches().map_err(|error| error.to_string())
+}
+
 /// Starts the desktop runtime and registers the minimal command surface.
 ///
 /// # Panics
@@ -73,7 +80,10 @@ fn get_dashboard_snapshot() -> Result<DashboardSnapshot, String> {
 /// with a fatal runtime error.
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![get_dashboard_snapshot])
+        .invoke_handler(tauri::generate_handler![
+            get_dashboard_snapshot,
+            scan_cleanup_preview
+        ])
         .run(tauri::generate_context!())
         .expect("failed to run Clarity Disk");
 }

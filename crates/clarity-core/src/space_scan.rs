@@ -146,5 +146,10 @@ pub enum SpaceScanError {
     TaskNotFound(String),
     /// The platform adapter failed while reading metadata.
     #[error("space scan failed at {path}: {message}")]
-    Read { path: String, message: String },
+    Read {
+        /// Path that could not be read.
+        path: String,
+        /// Platform error text safe for diagnostics.
+        message: String,
+    },
 }

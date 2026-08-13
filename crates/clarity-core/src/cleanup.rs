@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::fmt::Write;
 use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 
@@ -170,7 +171,13 @@ impl CleanupPlan {
         let encoded = serde_json::to_vec(&payload)
             .map_err(|error| CleanupPlanError::Serialization(error.to_string()))?;
         let digest = Sha256::digest(encoded);
-        let plan_digest = digest.iter().map(|byte| format!("{byte:02x}")).collect();
+        let plan_digest = digest.iter().fold(
+            String::with_capacity(digest.len() * 2),
+            |mut output, byte| {
+                write!(output, "{byte:02x}").expect("writing to a String cannot fail");
+                output
+            },
+        );
 
         let created_at_unix_ms = current_unix_ms();
         Ok(Self {
@@ -189,11 +196,21 @@ impl CleanupPlan {
     ///
     /// This method never changes files. It rejects stale scan identifiers,
     /// candidate changes, digest changes, or any newly selected rule output.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the preview is incomplete, expired, belongs to a
+    /// different scan or volume, or its candidate metadata has changed.
     pub fn validate_against(&self, preview: &CleanupPreview) -> Result<(), CleanupPlanError> {
         self.validate_against_at(preview, current_unix_ms())
     }
 
     /// Revalidates using a supplied clock, making expiry behavior testable.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error under the same stale or changed conditions as
+    /// [`Self::validate_against`], evaluated at `now_unix_ms`.
     pub fn validate_against_at(
         &self,
         preview: &CleanupPreview,
@@ -224,8 +241,9 @@ impl CleanupPlan {
 fn current_unix_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis().try_into().unwrap_or(u64::MAX))
-        .unwrap_or(0)
+        .map_or(0, |duration| {
+            duration.as_millis().try_into().unwrap_or(u64::MAX)
+        })
 }
 
 #[derive(Serialize)]
@@ -287,7 +305,10 @@ pub enum CleanupError {
 pub enum CleanupPlanError {
     /// Plans may only be derived from completed scans.
     #[error("cleanup plan requires a completed scan, got {status:?}")]
-    PreviewNotCompleted { status: ScanStatus },
+    PreviewNotCompleted {
+        /// Actual scan state returned by the preview.
+        status: ScanStatus,
+    },
     /// An empty selection cannot produce an actionable review artifact.
     #[error("cleanup plan has no selected candidates")]
     NoSelectedCandidates,

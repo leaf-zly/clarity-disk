@@ -11,6 +11,8 @@ pub enum SpaceScanStatus {
     Idle,
     /// The scanner is traversing the requested root.
     Scanning,
+    /// The scanner is paused at a cooperative boundary.
+    Paused,
     /// The task stopped at a safe cancellation boundary.
     Cancelled,
     /// The scanner completed the requested traversal.
@@ -29,6 +31,8 @@ pub struct SpaceScanRequest {
     pub max_depth: u8,
     /// Maximum number of filesystem entries to inspect.
     pub max_entries: u64,
+    /// Canonical roots or descendants that must not be traversed.
+    pub excluded_paths: Vec<String>,
 }
 
 /// A stable task identifier returned when a scan starts.
@@ -57,6 +61,14 @@ pub struct SpaceScanProgress {
     pub current_path: Option<String>,
     /// User-facing phase or failure message.
     pub message: String,
+    /// Approximate completion percentage based on the configured entry limit.
+    pub percent_complete: u8,
+    /// Estimated remaining seconds, when enough progress information exists.
+    pub estimated_seconds_remaining: Option<u64>,
+    /// Unix timestamp when the task started.
+    pub started_at_unix_ms: u64,
+    /// Unix timestamp when a terminal state was reached.
+    pub finished_at_unix_ms: Option<u64>,
 }
 
 /// A large file or directory reported by the scanner.
@@ -97,6 +109,26 @@ pub struct SpaceScanSnapshot {
     pub file_types: Vec<SpaceScanTypeStat>,
 }
 
+/// Persistable summary for a completed, cancelled, or failed scan.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpaceScanHistoryEntry {
+    /// Task identifier.
+    pub scan_id: String,
+    /// Scanned root path.
+    pub root_path: String,
+    /// Terminal task status.
+    pub status: SpaceScanStatus,
+    /// Entries inspected.
+    pub scanned_items: u64,
+    /// Bytes observed.
+    pub bytes_scanned: u64,
+    /// Task start time.
+    pub started_at_unix_ms: u64,
+    /// Task finish time.
+    pub finished_at_unix_ms: u64,
+}
+
 /// Validation and runtime errors for space scanning.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum SpaceScanError {
@@ -106,6 +138,9 @@ pub enum SpaceScanError {
     /// A request exceeded supported resource limits.
     #[error("space scan request exceeds supported limits")]
     InvalidLimits,
+    /// An excluded path was relative, inaccessible, or outside the scan root.
+    #[error("space scan excluded path is invalid or outside the scan root: {0}")]
+    InvalidExcludedPath(String),
     /// The task identifier did not exist.
     #[error("space scan task was not found: {0}")]
     TaskNotFound(String),

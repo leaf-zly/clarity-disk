@@ -13,6 +13,6 @@ pub use dashboard::{
     DiskMetadata, DiskSummary, Suggestion, SuggestionRisk, VolumeHealthStatus,
 };
 pub use space_scan::{
-    SpaceScanEntry, SpaceScanError, SpaceScanProgress, SpaceScanRequest, SpaceScanSnapshot,
-    SpaceScanStart, SpaceScanStatus, SpaceScanTypeStat,
+    SpaceScanEntry, SpaceScanError, SpaceScanHistoryEntry, SpaceScanProgress, SpaceScanRequest,
+    SpaceScanSnapshot, SpaceScanStart, SpaceScanStatus, SpaceScanTypeStat,
 };

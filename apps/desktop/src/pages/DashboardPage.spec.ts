@@ -1,5 +1,5 @@
 import { flushPromises, mount } from "@vue/test-utils";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import DashboardPage from "@/pages/DashboardPage.vue";
 import {
@@ -11,10 +11,25 @@ import { dashboardFixture } from "@/testing/dashboard-fixture";
 vi.mock("@/services/dashboard-service", () => ({
   loadCleanupPreview: vi.fn(),
   loadDashboardSnapshot: vi.fn(),
+  prepareCleanupPlan: vi.fn(),
+  startSpaceScan: vi.fn(),
+  getSpaceScan: vi.fn(),
+  cancelSpaceScan: vi.fn(),
+  pauseSpaceScan: vi.fn(),
+  resumeSpaceScan: vi.fn(),
+  getSpaceScanHistory: vi.fn().mockResolvedValue([]),
+  getDefaultSpaceScanRequest: vi.fn((rootPath: string) =>
+    Promise.resolve({
+      rootPath,
+      maxDepth: 8,
+      maxEntries: 100_000,
+      excludedPaths: [],
+    }),
+  ),
 }));
 
 describe("DashboardPage", () => {
-  it("renders disk capacity and recommendations returned by the service", async () => {
+  beforeEach(() => {
     vi.mocked(loadCleanupPreview).mockResolvedValue({
       scan: {
         scanId: "test",
@@ -27,10 +42,12 @@ describe("DashboardPage", () => {
       candidates: [],
       totalReclaimableBytes: 0,
     });
+  });
+
+  it("renders disk capacity and recommendations returned by the service", async () => {
     vi.mocked(loadDashboardSnapshot).mockResolvedValue(
       structuredClone(dashboardFixture),
     );
-
     const wrapper = mount(DashboardPage);
     await flushPromises();
 
@@ -41,25 +58,13 @@ describe("DashboardPage", () => {
     expect(wrapper.text()).toContain("可安全清理");
     expect(wrapper.text()).toContain("磁盘与卷");
     expect(wrapper.text()).toContain("资料 · 本地磁盘 (D:)");
+    expect(wrapper.text()).toContain("空间分析");
   });
 
   it("offers a retry when disk discovery fails", async () => {
-    vi.mocked(loadCleanupPreview).mockResolvedValue({
-      scan: {
-        scanId: "test",
-        status: "completed",
-        scannedItems: 0,
-        skippedItems: 0,
-        message: "扫描完成",
-        sourceVolumeId: "C:",
-      },
-      candidates: [],
-      totalReclaimableBytes: 0,
-    });
     vi.mocked(loadDashboardSnapshot).mockRejectedValue(
       new Error("disk discovery failed"),
     );
-
     const wrapper = mount(DashboardPage);
     await flushPromises();
 

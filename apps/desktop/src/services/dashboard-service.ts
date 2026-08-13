@@ -4,9 +4,20 @@ import type {
   CleanupPlan,
   CleanupPreview,
   DashboardSnapshot,
+  SpaceScanHistoryEntry,
   SpaceScanRequest,
   SpaceScanSnapshot,
+  SpaceScanStatus,
 } from "@/types/dashboard";
+
+interface BrowserScanTask {
+  request: SpaceScanRequest;
+  snapshot: SpaceScanSnapshot;
+  polls: number;
+}
+
+const browserScanTasks = new Map<string, BrowserScanTask>();
+const browserScanHistory: SpaceScanHistoryEntry[] = [];
 
 /** Loads the read-only dashboard snapshot. */
 export async function loadDashboardSnapshot(): Promise<DashboardSnapshot> {
@@ -141,21 +152,98 @@ export async function startSpaceScan(
 ): Promise<{ scanId: string }> {
   if (isTauri())
     return invoke<{ scanId: string }>("start_space_scan", { request });
-  return { scanId: `space-fixture-${Date.now()}` };
+  const scanId = `space-fixture-${Date.now()}`;
+  browserScanTasks.set(scanId, {
+    request: structuredClone(request),
+    polls: 0,
+    snapshot: createBrowserSnapshot(scanId, "scanning", 6),
+  });
+  return { scanId };
 }
 
-/** Polls a running space scan task. */
+/** Polls a running space scan task and returns its newest incremental snapshot. */
 export async function getSpaceScan(scanId: string): Promise<SpaceScanSnapshot> {
   if (isTauri()) return invoke<SpaceScanSnapshot>("get_space_scan", { scanId });
+  const task = browserScanTasks.get(scanId);
+  if (!task) throw new Error("扫描任务不存在或已过期");
+  if (task.snapshot.progress.status === "scanning") {
+    task.polls += 1;
+    const percent = Math.min(100, 6 + task.polls * 31);
+    task.snapshot = createBrowserSnapshot(
+      scanId,
+      percent >= 100 ? "completed" : "scanning",
+      percent,
+    );
+    if (task.snapshot.progress.status === "completed")
+      recordBrowserHistory(task);
+  }
+  return structuredClone(task.snapshot);
+}
+
+/** Requests cooperative cancellation of a running space scan. */
+export async function cancelSpaceScan(scanId: string): Promise<void> {
+  if (isTauri()) return void (await invoke("cancel_space_scan", { scanId }));
+  updateBrowserTask(scanId, "cancelled");
+}
+
+/** Pauses a running scan at a cooperative boundary. */
+export async function pauseSpaceScan(scanId: string): Promise<void> {
+  if (isTauri()) return void (await invoke("pause_space_scan", { scanId }));
+  updateBrowserTask(scanId, "paused");
+}
+
+/** Resumes a cooperatively paused scan. */
+export async function resumeSpaceScan(scanId: string): Promise<void> {
+  if (isTauri()) return void (await invoke("resume_space_scan", { scanId }));
+  updateBrowserTask(scanId, "scanning");
+}
+
+/** Returns recent terminal scan summaries from local application state. */
+export async function getSpaceScanHistory(): Promise<SpaceScanHistoryEntry[]> {
+  if (isTauri())
+    return invoke<SpaceScanHistoryEntry[]>("get_space_scan_history");
+  return structuredClone(browserScanHistory);
+}
+
+/** Returns a conservative default request for a discovered volume root. */
+export async function getDefaultSpaceScanRequest(
+  rootPath: string,
+): Promise<SpaceScanRequest> {
+  if (isTauri()) {
+    return invoke<SpaceScanRequest>("get_default_space_scan_request", {
+      rootPath,
+    });
+  }
+  return { rootPath, maxDepth: 8, maxEntries: 100_000, excludedPaths: [] };
+}
+function createBrowserSnapshot(
+  scanId: string,
+  status: SpaceScanStatus,
+  percent: number,
+): SpaceScanSnapshot {
+  const terminal = ["completed", "cancelled", "failed"].includes(status);
   return {
     progress: {
       scanId,
-      status: "completed",
-      scannedItems: 128,
+      status,
+      scannedItems: Math.round((1_280 * percent) / 100),
       skippedItems: 2,
-      bytesScanned: 2_840 * 1024 * 1024,
-      currentPath: "C:\\Users\\当前用户\\AppData\\Local",
-      message: "空间扫描完成（仅读取）",
+      bytesScanned: Math.round((2_840 * 1024 * 1024 * percent) / 100),
+      currentPath: terminal ? null : "C:\\Users\\当前用户\\AppData\\Local",
+      message:
+        status === "paused"
+          ? "扫描已暂停"
+          : status === "cancelled"
+            ? "扫描已取消"
+            : status === "completed"
+              ? "空间扫描完成（仅读取）"
+              : "正在分析目录空间",
+      percentComplete: status === "completed" ? 100 : Math.min(99, percent),
+      estimatedSecondsRemaining: terminal
+        ? 0
+        : Math.max(1, Math.ceil((100 - percent) / 20)),
+      startedAtUnixMs: Date.now() - 1_500,
+      finishedAtUnixMs: terminal ? Date.now() : null,
     },
     largestEntries: [
       {
@@ -171,11 +259,36 @@ export async function getSpaceScan(scanId: string): Promise<SpaceScanSnapshot> {
         kind: "file",
       },
     ],
-    fileTypes: [{ fileType: ".iso", bytes: 860 * 1024 * 1024, itemCount: 1 }],
+    fileTypes: [
+      { fileType: ".iso", bytes: 860 * 1024 * 1024, itemCount: 1 },
+      { fileType: ".zip", bytes: 430 * 1024 * 1024, itemCount: 12 },
+    ],
   };
 }
 
-/** Requests cooperative cancellation of a running space scan. */
-export async function cancelSpaceScan(scanId: string): Promise<void> {
-  if (isTauri()) await invoke("cancel_space_scan", { scanId });
+function updateBrowserTask(scanId: string, status: SpaceScanStatus): void {
+  const task = browserScanTasks.get(scanId);
+  if (!task) throw new Error("扫描任务不存在或已过期");
+  const percent = task.snapshot.progress.percentComplete;
+  task.snapshot = createBrowserSnapshot(scanId, status, percent);
+  if (["cancelled", "failed"].includes(status)) recordBrowserHistory(task);
+}
+
+function recordBrowserHistory(task: BrowserScanTask): void {
+  const progress = task.snapshot.progress;
+  if (
+    !progress.finishedAtUnixMs ||
+    browserScanHistory.some((entry) => entry.scanId === progress.scanId)
+  )
+    return;
+  browserScanHistory.unshift({
+    scanId: progress.scanId,
+    rootPath: task.request.rootPath,
+    status: progress.status,
+    scannedItems: progress.scannedItems,
+    bytesScanned: progress.bytesScanned,
+    startedAtUnixMs: progress.startedAtUnixMs,
+    finishedAtUnixMs: progress.finishedAtUnixMs,
+  });
+  browserScanHistory.splice(20);
 }

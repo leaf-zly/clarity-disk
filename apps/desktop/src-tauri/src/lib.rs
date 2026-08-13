@@ -112,6 +112,40 @@ fn cancel_space_scan(scan_id: String) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
+/// Pauses a running space scan at a cooperative boundary.
+#[tauri::command]
+fn pause_space_scan(scan_id: String) -> Result<(), String> {
+    SPACE_SCANS
+        .get_or_init(space_scan::SpaceScanManager::default)
+        .pause(&scan_id)
+        .map_err(|error| error.to_string())
+}
+
+/// Resumes a cooperatively paused space scan.
+#[tauri::command]
+fn resume_space_scan(scan_id: String) -> Result<(), String> {
+    SPACE_SCANS
+        .get_or_init(space_scan::SpaceScanManager::default)
+        .resume(&scan_id)
+        .map_err(|error| error.to_string())
+}
+
+/// Returns recent terminal space scan summaries.
+#[tauri::command]
+fn get_space_scan_history() -> Vec<clarity_core::SpaceScanHistoryEntry> {
+    SPACE_SCANS
+        .get_or_init(space_scan::SpaceScanManager::default)
+        .history()
+}
+
+/// Returns a safe default scope for the selected volume.
+#[tauri::command]
+fn get_default_space_scan_request(
+    root_path: String,
+) -> Result<clarity_core::SpaceScanRequest, String> {
+    space_scan::default_request(root_path).map_err(|error| error.to_string())
+}
+
 /// Starts the desktop runtime and registers the minimal command surface.
 ///
 /// # Panics
@@ -126,7 +160,11 @@ pub fn run() {
             prepare_cleanup_plan,
             start_space_scan,
             get_space_scan,
-            cancel_space_scan
+            cancel_space_scan,
+            pause_space_scan,
+            resume_space_scan,
+            get_space_scan_history,
+            get_default_space_scan_request
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Clarity Disk");

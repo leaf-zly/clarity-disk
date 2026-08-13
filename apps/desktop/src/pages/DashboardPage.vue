@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, shallowRef } from "vue";
+import { computed, onMounted, shallowRef, watch } from "vue";
 import {
   CalendarClock,
   ChevronRight,
@@ -16,19 +16,17 @@ import DiskVolumeList from "@/components/DiskVolumeList.vue";
 import CleanupPreviewPanel from "@/components/CleanupPreviewPanel.vue";
 import MetricCard from "@/components/MetricCard.vue";
 import SuggestionItem from "@/components/SuggestionItem.vue";
+import { useSpaceScan } from "@/composables/use-space-scan";
 import {
+  getDefaultSpaceScanRequest,
   loadCleanupPreview,
   loadDashboardSnapshot,
   prepareCleanupPlan,
-  startSpaceScan,
-  getSpaceScan,
-  cancelSpaceScan,
 } from "@/services/dashboard-service";
 import type {
   CleanupPlan,
   CleanupPreview,
   DashboardSnapshot,
-  SpaceScanSnapshot,
 } from "@/types/dashboard";
 
 const snapshot = shallowRef<DashboardSnapshot>();
@@ -39,9 +37,21 @@ const cleanupPreview = shallowRef<CleanupPreview>();
 const isCleanupLoading = shallowRef(false);
 const cleanupPlan = shallowRef<CleanupPlan>();
 const isPreparingPlan = shallowRef(false);
-const spaceScan = shallowRef<SpaceScanSnapshot>();
-const isStartingSpaceScan = shallowRef(false);
-let activeSpaceScanId: string | undefined;
+const scanRoot = shallowRef("C:\\");
+const scanMaxDepth = shallowRef(8);
+const scanMaxEntries = shallowRef(100_000);
+const excludedPaths = shallowRef("");
+const {
+  snapshot: spaceScan,
+  history: spaceScanHistory,
+  error: spaceScanError,
+  isStarting: isStartingSpaceScan,
+  start: startScan,
+  pause: pauseScan,
+  resume: resumeScan,
+  cancel: cancelScan,
+  refreshHistory: refreshSpaceScanHistory,
+} = useSpaceScan();
 const selectedDisk = computed(() => {
   if (!snapshot.value) {
     return undefined;
@@ -93,28 +103,43 @@ async function preparePlan(): Promise<void> {
 
 /** Starts and polls a bounded read-only scan, stopping when it reaches a terminal state. */
 async function startSpaceAnalysis(): Promise<void> {
-  isStartingSpaceScan.value = true;
+  const excluded = excludedPaths.value
+    .split(/\r?\n/)
+    .map((path) => path.trim())
+    .filter(Boolean);
+  await startScan({
+    rootPath: scanRoot.value.trim(),
+    maxDepth: scanMaxDepth.value,
+    maxEntries: scanMaxEntries.value,
+    excludedPaths: excluded,
+  });
+}
+
+/** Applies backend-generated safe defaults when the selected volume changes. */
+async function applySelectedVolumeScope(): Promise<void> {
+  const rootPath = selectedDisk.value?.metadata.mountPoint;
+  if (!rootPath) return;
   try {
-    const started = await startSpaceScan({
-      rootPath: "C:\\Users\\当前用户",
-      maxDepth: 6,
-      maxEntries: 100_000,
-    });
-    activeSpaceScanId = started.scanId;
-    spaceScan.value = await getSpaceScan(started.scanId);
-  } finally {
-    isStartingSpaceScan.value = false;
+    const request = await getDefaultSpaceScanRequest(rootPath);
+    scanRoot.value = request.rootPath;
+    scanMaxDepth.value = request.maxDepth;
+    scanMaxEntries.value = request.maxEntries;
+    excludedPaths.value = request.excludedPaths.join("\n");
+  } catch {
+    // Discovery already validated this mount point. Preserve a usable read-only
+    // fallback while the user can still adjust the scope before starting.
+    scanRoot.value = rootPath;
+    excludedPaths.value = "";
   }
 }
 
-/** Requests cooperative cancellation of the active scan task. */
-async function stopSpaceAnalysis(): Promise<void> {
-  if (activeSpaceScanId) await cancelSpaceScan(activeSpaceScanId);
-}
+watch(selectedDiskId, () => void applySelectedVolumeScope());
 
 onMounted(async () => {
   await refreshDashboard();
   await refreshCleanupPreview();
+  await refreshSpaceScanHistory();
+  await applySelectedVolumeScope();
 });
 </script>
 
@@ -172,9 +197,17 @@ onMounted(async () => {
 
       <SpaceScanPanel
         :snapshot="spaceScan"
+        :history="spaceScanHistory"
+        :error="spaceScanError"
         :is-starting="isStartingSpaceScan"
+        v-model:scan-root="scanRoot"
+        v-model:max-depth="scanMaxDepth"
+        v-model:max-entries="scanMaxEntries"
+        v-model:excluded-paths="excludedPaths"
         @start-scan="startSpaceAnalysis"
-        @cancel-scan="stopSpaceAnalysis"
+        @pause-scan="pauseScan"
+        @resume-scan="resumeScan"
+        @cancel-scan="cancelScan"
       />
 
       <div class="section-heading">

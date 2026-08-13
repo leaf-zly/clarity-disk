@@ -69,7 +69,7 @@ fn get_dashboard_snapshot() -> Result<DashboardSnapshot, String> {
 /// Produces a read-only browser-cache cleanup preview.
 #[tauri::command]
 fn scan_cleanup_preview() -> Result<clarity_core::CleanupPreview, String> {
-    cleanup_scan::scan_browser_caches().map_err(|error| error.to_string())
+    cleanup_scan::scan_cleanup_preview().map_err(|error| error.to_string())
 }
 
 /// Starts the desktop runtime and registers the minimal command surface.

@@ -19,8 +19,8 @@ export async function loadDashboardSnapshot(): Promise<DashboardSnapshot> {
 }
 
 /**
- * Runs the read-only browser-cache scanner. The command only measures
- * allow-listed roots and never deletes or moves files.
+ * Runs the read-only cleanup scanner. The command only measures allow-listed
+ * roots and never deletes or moves files.
  *
  * @returns A preview containing candidates and scan provenance.
  */
@@ -31,26 +31,50 @@ export async function loadCleanupPreview(): Promise<CleanupPreview> {
 
   return {
     scan: {
-      scanId: "browser-preview",
+      scanId: "cleanup-preview",
       status: "completed",
-      scannedItems: 12,
+      scannedItems: 84,
       skippedItems: 0,
-      message: "浏览器缓存扫描完成（仅预览）",
+      message: "清理扫描完成（仅预览）",
     },
     candidates: [
       {
-        id: "browser-cache:chrome",
+        id: "browser-cache.v1",
         ruleId: "browser-cache.v1",
-        title: "Chrome 缓存",
-        description: "可由浏览器重新生成的缓存内容，不会直接删除文件",
-        path: "C:\\Users\\当前用户\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\Cache",
+        title: "浏览器缓存",
+        description: "Chrome、Edge 与 Brave 可重新生成的缓存内容",
+        path: "C:\\Users\\当前用户\\AppData\\Local\\浏览器缓存",
         bytes: 454 * 1024 * 1024,
         itemCount: 120,
         risk: "safe",
         recoverable: true,
         defaultSelected: true,
       },
+      {
+        id: "thumbnail-cache.v1",
+        ruleId: "thumbnail-cache.v1",
+        title: "缩略图缓存",
+        description: "Windows 可重新生成的缩略图数据库",
+        path: "C:\\Users\\当前用户\\AppData\\Local\\Microsoft\\Windows\\Explorer",
+        bytes: 86 * 1024 * 1024,
+        itemCount: 8,
+        risk: "safe",
+        recoverable: true,
+        defaultSelected: true,
+      },
+      {
+        id: "user-temp.v1",
+        ruleId: "user-temp.v1",
+        title: "用户临时文件",
+        description: "应用运行产生的临时内容，正在使用的项目会被跳过",
+        path: "C:\\Users\\当前用户\\AppData\\Local\\Temp",
+        bytes: 238 * 1024 * 1024,
+        itemCount: 64,
+        risk: "review",
+        recoverable: true,
+        defaultSelected: false,
+      },
     ],
-    totalReclaimableBytes: 454 * 1024 * 1024,
+    totalReclaimableBytes: 778 * 1024 * 1024,
   };
 }

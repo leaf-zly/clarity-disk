@@ -1,5 +1,4 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
-
 import { dashboardFixture } from "@/testing/dashboard-fixture";
 import type {
   CleanupPlan,
@@ -7,32 +6,40 @@ import type {
   DashboardSnapshot,
 } from "@/types/dashboard";
 
-/**
- * Loads the dashboard snapshot from the Tauri command layer. Browser-only
- * development uses a cloned fixture so the Vue interface remains independently
- * testable without privileged or platform-specific dependencies.
- *
- * @returns The current dashboard snapshot.
- */
+/** Loads the read-only dashboard snapshot. */
 export async function loadDashboardSnapshot(): Promise<DashboardSnapshot> {
-  if (isTauri()) {
-    return invoke<DashboardSnapshot>("get_dashboard_snapshot");
-  }
-
+  if (isTauri()) return invoke<DashboardSnapshot>("get_dashboard_snapshot");
   return structuredClone(dashboardFixture);
 }
 
-/**
- * Runs the read-only cleanup scanner. The command only measures allow-listed
- * roots and never deletes or moves files.
- *
- * @returns A preview containing candidates and scan provenance.
- */
+/** Runs the read-only cleanup scanner and returns candidate metadata snapshots. */
 export async function loadCleanupPreview(): Promise<CleanupPreview> {
-  if (isTauri()) {
-    return invoke<CleanupPreview>("scan_cleanup_preview");
-  }
-
+  if (isTauri()) return invoke<CleanupPreview>("scan_cleanup_preview");
+  const candidate = (
+    id: string,
+    ruleId: string,
+    title: string,
+    description: string,
+    path: string,
+    bytes: number,
+    itemCount: number,
+    risk: "safe" | "review",
+    defaultSelected: boolean,
+    metadataDigest: string,
+  ) => ({
+    id,
+    ruleId,
+    title,
+    description,
+    path,
+    bytes,
+    itemCount,
+    risk,
+    recoverable: true,
+    defaultSelected,
+    metadataDigest,
+    observedAtUnixMs: 1,
+  });
   return {
     scan: {
       scanId: "cleanup-preview",
@@ -42,82 +49,74 @@ export async function loadCleanupPreview(): Promise<CleanupPreview> {
       message: "清理扫描完成（仅预览）",
     },
     candidates: [
-      {
-        id: "browser-cache.v1",
-        ruleId: "browser-cache.v1",
-        title: "浏览器缓存",
-        description: "Chrome、Edge 与 Brave 可重新生成的缓存内容",
-        path: "C:\\Users\\当前用户\\AppData\\Local\\浏览器缓存",
-        bytes: 454 * 1024 * 1024,
-        itemCount: 120,
-        risk: "safe",
-        recoverable: true,
-        defaultSelected: true,
-      },
-      {
-        id: "thumbnail-cache.v1",
-        ruleId: "thumbnail-cache.v1",
-        title: "缩略图缓存",
-        description: "Windows 可重新生成的缩略图数据库",
-        path: "C:\\Users\\当前用户\\AppData\\Local\\Microsoft\\Windows\\Explorer",
-        bytes: 86 * 1024 * 1024,
-        itemCount: 8,
-        risk: "safe",
-        recoverable: true,
-        defaultSelected: true,
-      },
-      {
-        id: "user-temp.v1",
-        ruleId: "user-temp.v1",
-        title: "用户临时文件",
-        description: "应用运行产生的临时内容，正在使用的项目会被跳过",
-        path: "C:\\Users\\当前用户\\AppData\\Local\\Temp",
-        bytes: 238 * 1024 * 1024,
-        itemCount: 64,
-        risk: "review",
-        recoverable: true,
-        defaultSelected: false,
-      },
-      {
-        id: "recycle-bin.v1",
-        ruleId: "recycle-bin.v1",
-        title: "回收站",
-        description: "已移入 Windows 回收站的项目，永久清空前仍可恢复",
-        path: "C:\\$Recycle.Bin",
-        bytes: 389 * 1024 * 1024,
-        itemCount: 37,
-        risk: "review",
-        recoverable: true,
-        defaultSelected: false,
-      },
-      {
-        id: "build-cache.v1",
-        ruleId: "build-cache.v1",
-        title: "应用构建缓存",
-        description: "包管理器和开发工具可重新生成的缓存，首次构建可能变慢",
-        path: "C:\\Users\\当前用户\\AppData\\Local\\npm-cache",
-        bytes: 512 * 1024 * 1024,
-        itemCount: 240,
-        risk: "review",
-        recoverable: true,
-        defaultSelected: false,
-      },
+      candidate(
+        "browser-cache.v1",
+        "browser-cache.v1",
+        "浏览器缓存",
+        "Chrome、Edge 与 Brave 可重新生成的缓存内容",
+        "C:\\Users\\当前用户\\AppData\\Local\\浏览器缓存",
+        454 * 1024 * 1024,
+        120,
+        "safe",
+        true,
+        "fixture-browser-cache",
+      ),
+      candidate(
+        "thumbnail-cache.v1",
+        "thumbnail-cache.v1",
+        "缩略图缓存",
+        "Windows 可重新生成的缩略图数据库",
+        "C:\\Users\\当前用户\\AppData\\Local\\Microsoft\\Windows\\Explorer",
+        86 * 1024 * 1024,
+        8,
+        "safe",
+        true,
+        "fixture-thumbnail-cache",
+      ),
+      candidate(
+        "user-temp.v1",
+        "user-temp.v1",
+        "用户临时文件",
+        "应用运行产生的临时内容，正在使用的项目会被跳过",
+        "C:\\Users\\当前用户\\AppData\\Local\\Temp",
+        238 * 1024 * 1024,
+        64,
+        "review",
+        false,
+        "fixture-user-temp",
+      ),
+      candidate(
+        "recycle-bin.v1",
+        "recycle-bin.v1",
+        "回收站",
+        "已移入 Windows 回收站的项目，永久清空前仍可恢复",
+        "C:\\$Recycle.Bin",
+        389 * 1024 * 1024,
+        37,
+        "review",
+        false,
+        "fixture-recycle-bin",
+      ),
+      candidate(
+        "build-cache.v1",
+        "build-cache.v1",
+        "应用构建缓存",
+        "包管理器和开发工具可重新生成的缓存，首次构建可能变慢",
+        "C:\\Users\\当前用户\\AppData\\Local\\npm-cache",
+        512 * 1024 * 1024,
+        240,
+        "review",
+        false,
+        "fixture-build-cache",
+      ),
     ],
     totalReclaimableBytes: 1_679 * 1024 * 1024,
   };
 }
 
-/**
- * Creates a fresh immutable cleanup plan for review only. No executor is
- * called, and the returned plan is explicitly marked unauthorized.
- *
- * @returns A non-authorizing plan derived from the latest read-only scan.
- */
+/** Creates a review-only plan; execution remains unauthorized. */
 export async function prepareCleanupPlan(): Promise<CleanupPlan> {
-  if (isTauri()) {
-    return invoke<CleanupPlan>("prepare_cleanup_plan");
-  }
-
+  if (isTauri()) return invoke<CleanupPlan>("prepare_cleanup_plan");
   const preview = await loadCleanupPreview();
   return {
     planId: `plan-${preview.scan.scanId}`,

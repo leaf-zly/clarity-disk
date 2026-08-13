@@ -1,9 +1,6 @@
-/**
- * Stable disk usage category identifiers shared with the Rust domain model.
- */
+/** Stable disk usage category identifiers shared with the Rust domain model. */
 export type DiskCategoryKind =
   "applications" | "system" | "files" | "development";
-
 /** Risk levels used to control default selection and confirmation behavior. */
 export type SuggestionRisk = "safe" | "review" | "confirmationRequired";
 /** Lifecycle states emitted by the read-only cleanup scanner. */
@@ -29,6 +26,8 @@ export interface CleanupCandidate {
   risk: SuggestionRisk;
   recoverable: boolean;
   defaultSelected: boolean;
+  metadataDigest: string;
+  observedAtUnixMs: number | null;
 }
 /** Complete cleanup preview returned by the scanner. */
 export interface CleanupPreview {

@@ -64,6 +64,10 @@ pub struct CleanupCandidate {
     pub recoverable: bool,
     /// Whether the preview selects this candidate by default.
     pub default_selected: bool,
+    /// SHA-256 digest of the discovered file metadata, not file contents.
+    pub metadata_digest: String,
+    /// Wall-clock time when this candidate was observed, in Unix milliseconds.
+    pub observed_at_unix_ms: Option<u64>,
 }
 
 /// Complete read-only cleanup preview returned to the UI.
@@ -137,6 +141,26 @@ impl CleanupPlan {
             execution_authorized: false,
         })
     }
+
+    /// Revalidates this plan against a fresh read-only preview.
+    ///
+    /// This method never changes files. It rejects stale scan identifiers,
+    /// candidate changes, digest changes, or any newly selected rule output.
+    pub fn validate_against(&self, preview: &CleanupPreview) -> Result<(), CleanupPlanError> {
+        if preview.scan.status != ScanStatus::Completed {
+            return Err(CleanupPlanError::PreviewNotCompleted {
+                status: preview.scan.status,
+            });
+        }
+        if self.scan_id != preview.scan.scan_id {
+            return Err(CleanupPlanError::ScanIdChanged);
+        }
+        let current = Self::from_preview(preview)?;
+        if current.plan_digest != self.plan_digest || current.candidates != self.candidates {
+            return Err(CleanupPlanError::CandidateChanged);
+        }
+        Ok(())
+    }
 }
 
 #[derive(Serialize)]
@@ -202,6 +226,12 @@ pub enum CleanupPlanError {
     /// An empty selection cannot produce an actionable review artifact.
     #[error("cleanup plan has no selected candidates")]
     NoSelectedCandidates,
+    /// The fresh scan belongs to a different scan session.
+    #[error("cleanup plan scan id changed")]
+    ScanIdChanged,
+    /// One or more candidate snapshots differ from the original plan.
+    #[error("cleanup plan candidates changed; a fresh plan is required")]
+    CandidateChanged,
     /// Candidate data could not be encoded for digesting.
     #[error("cleanup plan could not be serialized: {0}")]
     Serialization(String),
@@ -224,6 +254,8 @@ mod tests {
             risk: SuggestionRisk::Safe,
             recoverable: true,
             default_selected: true,
+            metadata_digest: "digest".to_owned(),
+            observed_at_unix_ms: Some(1),
         }
     }
 
@@ -293,6 +325,20 @@ mod tests {
         assert_eq!(
             super::CleanupPlan::from_preview(&preview),
             Err(super::CleanupPlanError::NoSelectedCandidates)
+        );
+    }
+
+    #[test]
+    fn rejects_changed_candidate_snapshot() {
+        let preview = CleanupPreview::completed(completed_scan(), vec![candidate(20)])
+            .expect("completed scan should produce a preview");
+        let plan = super::CleanupPlan::from_preview(&preview).expect("plan should be valid");
+        let mut changed = preview.clone();
+        changed.candidates[0].metadata_digest = "changed".to_owned();
+
+        assert_eq!(
+            plan.validate_against(&changed),
+            Err(super::CleanupPlanError::CandidateChanged)
         );
     }
 }

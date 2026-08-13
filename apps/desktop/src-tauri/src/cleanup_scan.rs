@@ -2,10 +2,12 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use clarity_core::{
     CleanupCandidate, CleanupError, CleanupPreview, ScanProgress, ScanStatus, SuggestionRisk,
 };
+use sha2::{Digest, Sha256};
 
 const BROWSER_CACHE_RULE_ID: &str = "browser-cache.v1";
 const THUMBNAIL_CACHE_RULE_ID: &str = "thumbnail-cache.v1";
@@ -21,6 +23,12 @@ struct CleanupRule {
     risk: SuggestionRisk,
     recoverable: bool,
     default_selected: bool,
+}
+
+struct TreeMeasurement {
+    bytes: u64,
+    items: u64,
+    metadata_digest: String,
 }
 
 /// Scans all currently enabled low-risk cleanup roots without deleting,
@@ -40,25 +48,28 @@ pub fn scan_cleanup_preview() -> Result<CleanupPreview, CleanupScanError> {
     for rule in cleanup_rules() {
         let mut bytes = 0_u64;
         let mut items = 0_u64;
+        let mut metadata_hasher = Sha256::new();
+        let mut observed_at_unix_ms = None;
         for path in &rule.paths {
             if !path.exists() {
                 continue;
             }
-            let (path_bytes, path_items) =
-                match measure_tree(path, &mut scanned_items, &mut skipped_items) {
-                    Ok(result) => result,
-                    // A locked or concurrently removed cache must not make the whole
-                    // read-only preview unusable; retain the skip count as provenance.
-                    Err(CleanupScanError::Read { .. }) => {
-                        skipped_items = skipped_items.saturating_add(1);
-                        continue;
-                    }
-                    Err(error) => return Err(error),
-                };
+            let measurement = match measure_tree(path, &mut scanned_items, &mut skipped_items) {
+                Ok(result) => result,
+                // A locked or concurrently removed cache must not make the whole
+                // read-only preview unusable; retain the skip count as provenance.
+                Err(CleanupScanError::Read { .. }) => {
+                    skipped_items = skipped_items.saturating_add(1);
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
             bytes = bytes
-                .checked_add(path_bytes)
+                .checked_add(measurement.bytes)
                 .ok_or(CleanupScanError::SizeOverflow)?;
-            items = items.saturating_add(path_items);
+            items = items.saturating_add(measurement.items);
+            metadata_hasher.update(measurement.metadata_digest.as_bytes());
+            observed_at_unix_ms = Some(current_unix_ms());
         }
         if bytes == 0 {
             continue;
@@ -79,6 +90,8 @@ pub fn scan_cleanup_preview() -> Result<CleanupPreview, CleanupScanError> {
             risk: rule.risk,
             recoverable: rule.recoverable,
             default_selected: rule.default_selected,
+            metadata_digest: format_digest(metadata_hasher.finalize()),
+            observed_at_unix_ms,
         });
     }
 
@@ -187,26 +200,50 @@ fn measure_tree(
     root: &Path,
     scanned_items: &mut u64,
     skipped_items: &mut u64,
-) -> Result<(u64, u64), CleanupScanError> {
+) -> Result<TreeMeasurement, CleanupScanError> {
     let metadata = fs::symlink_metadata(root).map_err(|error| CleanupScanError::Read {
         path: root.to_path_buf(),
         source: error,
     })?;
     if metadata.file_type().is_symlink() {
         *skipped_items = skipped_items.saturating_add(1);
-        return Ok((0, 0));
+        return Ok(TreeMeasurement {
+            bytes: 0,
+            items: 0,
+            metadata_digest: String::new(),
+        });
     }
     if metadata.is_file() {
         *scanned_items = scanned_items.saturating_add(1);
-        return Ok((metadata.len(), 1));
+        let mut hasher = Sha256::new();
+        hasher.update(root.to_string_lossy().as_bytes());
+        hasher.update(metadata.len().to_le_bytes());
+        hasher.update(
+            metadata
+                .modified()
+                .ok()
+                .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+                .map(|duration| duration.as_nanos().to_le_bytes().to_vec())
+                .unwrap_or_default(),
+        );
+        return Ok(TreeMeasurement {
+            bytes: metadata.len(),
+            items: 1,
+            metadata_digest: format_digest(hasher.finalize()),
+        });
     }
     if !metadata.is_dir() {
         *skipped_items = skipped_items.saturating_add(1);
-        return Ok((0, 0));
+        return Ok(TreeMeasurement {
+            bytes: 0,
+            items: 0,
+            metadata_digest: String::new(),
+        });
     }
 
     let mut total_bytes = 0_u64;
     let mut total_items = 0_u64;
+    let mut hasher = Sha256::new();
     let entries = fs::read_dir(root).map_err(|error| CleanupScanError::Read {
         path: root.to_path_buf(),
         source: error,
@@ -225,11 +262,12 @@ fn measure_tree(
             continue;
         }
         match measure_tree(&path, scanned_items, skipped_items) {
-            Ok((bytes, items)) => {
+            Ok(measurement) => {
                 total_bytes = total_bytes
-                    .checked_add(bytes)
+                    .checked_add(measurement.bytes)
                     .ok_or(CleanupScanError::SizeOverflow)?;
-                total_items = total_items.saturating_add(items);
+                total_items = total_items.saturating_add(measurement.items);
+                hasher.update(measurement.metadata_digest.as_bytes());
             }
             Err(CleanupScanError::Read { .. }) => {
                 *skipped_items = skipped_items.saturating_add(1);
@@ -237,7 +275,26 @@ fn measure_tree(
             Err(error) => return Err(error),
         }
     }
-    Ok((total_bytes, total_items))
+    Ok(TreeMeasurement {
+        bytes: total_bytes,
+        items: total_items,
+        metadata_digest: format_digest(hasher.finalize()),
+    })
+}
+
+fn format_digest(digest: impl AsRef<[u8]>) -> String {
+    digest
+        .as_ref()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+fn current_unix_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis().try_into().unwrap_or(u64::MAX))
+        .unwrap_or(0)
 }
 
 fn is_allowed_path(root: &Path, path: &Path) -> bool {
@@ -292,7 +349,8 @@ mod tests {
         let result =
             measure_tree(&root, &mut scanned, &mut skipped).expect("test tree should be readable");
 
-        assert_eq!(result, (6, 2));
+        assert_eq!(result.bytes, 6);
+        assert_eq!(result.items, 2);
         assert_eq!(scanned, 2);
         assert_eq!(skipped, 0);
         assert_eq!(
@@ -327,7 +385,8 @@ mod tests {
         let result = measure_tree(&root, &mut scanned, &mut skipped)
             .expect("symlink should be skipped safely");
 
-        assert_eq!(result, (6, 1));
+        assert_eq!(result.bytes, 6);
+        assert_eq!(result.items, 1);
         assert_eq!(scanned, 1);
         assert_eq!(skipped, 1);
         let _ = fs::remove_dir_all(root);

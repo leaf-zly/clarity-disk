@@ -89,7 +89,7 @@ function riskLabel(risk: SuggestionRisk): string {
     </div>
     <div v-else class="empty-preview">
       <Eye :size="18" aria-hidden="true" />
-      <span>未发现允许预览的浏览器缓存</span>
+      <span>未发现允许预览的清理项目</span>
     </div>
 
     <div class="preview-note">

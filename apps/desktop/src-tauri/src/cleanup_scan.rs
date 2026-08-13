@@ -10,6 +10,8 @@ use clarity_core::{
 const BROWSER_CACHE_RULE_ID: &str = "browser-cache.v1";
 const THUMBNAIL_CACHE_RULE_ID: &str = "thumbnail-cache.v1";
 const USER_TEMP_RULE_ID: &str = "user-temp.v1";
+const RECYCLE_BIN_RULE_ID: &str = "recycle-bin.v1";
+const BUILD_CACHE_RULE_ID: &str = "build-cache.v1";
 
 struct CleanupRule {
     id: &'static str,
@@ -29,7 +31,7 @@ pub fn scan_cleanup_preview() -> Result<CleanupPreview, CleanupScanError> {
         status: ScanStatus::Scanning,
         scanned_items: 0,
         skipped_items: 0,
-        message: "正在读取浏览器缓存目录".to_owned(),
+        message: "正在读取允许的清理目录".to_owned(),
     };
     let mut candidates = Vec::new();
     let mut scanned_items = 0_u64;
@@ -84,7 +86,7 @@ pub fn scan_cleanup_preview() -> Result<CleanupPreview, CleanupScanError> {
         status: ScanStatus::Completed,
         scanned_items,
         skipped_items,
-        message: "浏览器缓存扫描完成（仅预览）".to_owned(),
+        message: "清理扫描完成（仅预览）".to_owned(),
         ..scan
     };
 
@@ -128,6 +130,24 @@ fn cleanup_rules() -> Vec<CleanupRule> {
             recoverable: true,
             default_selected: false,
         },
+        CleanupRule {
+            id: RECYCLE_BIN_RULE_ID,
+            title: "回收站",
+            description: "已移入 Windows 回收站的项目，永久清空前仍可恢复",
+            paths: recycle_bin_paths(),
+            risk: SuggestionRisk::Review,
+            recoverable: true,
+            default_selected: false,
+        },
+        CleanupRule {
+            id: BUILD_CACHE_RULE_ID,
+            title: "应用构建缓存",
+            description: "包管理器和开发工具可重新生成的缓存，首次构建可能变慢",
+            paths: build_cache_paths(&local_app_data),
+            risk: SuggestionRisk::Review,
+            recoverable: true,
+            default_selected: false,
+        },
     ]
 }
 
@@ -145,6 +165,22 @@ fn temp_paths() -> Vec<PathBuf> {
         .map(PathBuf::from)
         .into_iter()
         .collect()
+}
+
+fn recycle_bin_paths() -> Vec<PathBuf> {
+    let Some(system_drive) = std::env::var_os("SystemDrive") else {
+        return Vec::new();
+    };
+    vec![PathBuf::from(system_drive).join("$Recycle.Bin")]
+}
+
+fn build_cache_paths(local_app_data: &Path) -> Vec<PathBuf> {
+    [
+        local_app_data.join("npm-cache"),
+        local_app_data.join("Yarn/Cache"),
+        local_app_data.join("pnpm/store"),
+        local_app_data.join("NuGet/Cache"),
+    ]
 }
 
 fn measure_tree(

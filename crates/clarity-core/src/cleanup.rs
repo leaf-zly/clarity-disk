@@ -402,11 +402,19 @@ mod tests {
         let first = super::CleanupPlan::from_preview(&preview).expect("plan should be valid");
         let second = super::CleanupPlan::from_preview(&preview).expect("plan should be valid");
 
-        assert_eq!(first, second);
+        // Wall-clock timestamps may advance between consecutive calls; the
+        // immutable target identity and digest are the deterministic fields.
+        assert_eq!(first.plan_id, second.plan_id);
+        assert_eq!(first.scan_id, second.scan_id);
+        assert_eq!(first.candidates, second.candidates);
+        assert_eq!(first.plan_digest, second.plan_digest);
+        assert_eq!(first.source_volume_id, second.source_volume_id);
         assert_eq!(first.candidates.len(), 1);
         assert!(!first.execution_authorized);
+        assert!(!second.execution_authorized);
         assert_eq!(first.plan_digest.len(), 64);
         assert!(first.expires_at_unix_ms > first.created_at_unix_ms);
+        assert!(second.expires_at_unix_ms > second.created_at_unix_ms);
     }
 
     #[test]

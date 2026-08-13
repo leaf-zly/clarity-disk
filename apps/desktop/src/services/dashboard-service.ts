@@ -4,6 +4,8 @@ import type {
   CleanupPlan,
   CleanupPreview,
   DashboardSnapshot,
+  SpaceScanRequest,
+  SpaceScanSnapshot,
 } from "@/types/dashboard";
 
 /** Loads the read-only dashboard snapshot. */
@@ -131,4 +133,49 @@ export async function prepareCleanupPlan(): Promise<CleanupPlan> {
     expiresAtUnixMs: Date.now() + 10 * 60 * 1000,
     sourceVolumeId: preview.scan.sourceVolumeId,
   };
+}
+
+/** Starts a bounded read-only space scan for the selected root. */
+export async function startSpaceScan(
+  request: SpaceScanRequest,
+): Promise<{ scanId: string }> {
+  if (isTauri())
+    return invoke<{ scanId: string }>("start_space_scan", { request });
+  return { scanId: `space-fixture-${Date.now()}` };
+}
+
+/** Polls a running space scan task. */
+export async function getSpaceScan(scanId: string): Promise<SpaceScanSnapshot> {
+  if (isTauri()) return invoke<SpaceScanSnapshot>("get_space_scan", { scanId });
+  return {
+    progress: {
+      scanId,
+      status: "completed",
+      scannedItems: 128,
+      skippedItems: 2,
+      bytesScanned: 2_840 * 1024 * 1024,
+      currentPath: "C:\\Users\\当前用户\\AppData\\Local",
+      message: "空间扫描完成（仅读取）",
+    },
+    largestEntries: [
+      {
+        path: "C:\\Users\\当前用户\\AppData\\Local\\Packages",
+        bytes: 1_240 * 1024 * 1024,
+        itemCount: 480,
+        kind: "directory",
+      },
+      {
+        path: "C:\\Users\\当前用户\\Downloads\\installer.iso",
+        bytes: 860 * 1024 * 1024,
+        itemCount: 1,
+        kind: "file",
+      },
+    ],
+    fileTypes: [{ fileType: ".iso", bytes: 860 * 1024 * 1024, itemCount: 1 }],
+  };
+}
+
+/** Requests cooperative cancellation of a running space scan. */
+export async function cancelSpaceScan(scanId: string): Promise<void> {
+  if (isTauri()) await invoke("cancel_space_scan", { scanId });
 }

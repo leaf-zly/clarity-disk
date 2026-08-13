@@ -1,9 +1,13 @@
 //! Tauri command adapter for the Clarity Disk desktop application.
 
 use clarity_core::{CleanupSummary, DashboardSnapshot, DiskHealth, Suggestion, SuggestionRisk};
+use std::sync::OnceLock;
 
 mod cleanup_scan;
 mod disk_discovery;
+mod space_scan;
+
+static SPACE_SCANS: OnceLock<space_scan::SpaceScanManager> = OnceLock::new();
 
 const GIB: u64 = 1024 * 1024 * 1024;
 const MIB: u64 = 1024 * 1024;
@@ -79,6 +83,35 @@ fn prepare_cleanup_plan() -> Result<clarity_core::CleanupPlan, String> {
     clarity_core::CleanupPlan::from_preview(&preview).map_err(|error| error.to_string())
 }
 
+/// Starts a bounded, read-only directory scan.
+#[tauri::command]
+fn start_space_scan(
+    request: clarity_core::SpaceScanRequest,
+) -> Result<clarity_core::SpaceScanStart, String> {
+    SPACE_SCANS
+        .get_or_init(space_scan::SpaceScanManager::default)
+        .start(request)
+        .map_err(|error| error.to_string())
+}
+
+/// Returns the latest snapshot for a space scan task.
+#[tauri::command]
+fn get_space_scan(scan_id: String) -> Result<clarity_core::SpaceScanSnapshot, String> {
+    SPACE_SCANS
+        .get_or_init(space_scan::SpaceScanManager::default)
+        .snapshot(&scan_id)
+        .map_err(|error| error.to_string())
+}
+
+/// Requests cooperative cancellation of a space scan task.
+#[tauri::command]
+fn cancel_space_scan(scan_id: String) -> Result<(), String> {
+    SPACE_SCANS
+        .get_or_init(space_scan::SpaceScanManager::default)
+        .cancel(&scan_id)
+        .map_err(|error| error.to_string())
+}
+
 /// Starts the desktop runtime and registers the minimal command surface.
 ///
 /// # Panics
@@ -90,7 +123,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_dashboard_snapshot,
             scan_cleanup_preview,
-            prepare_cleanup_plan
+            prepare_cleanup_plan,
+            start_space_scan,
+            get_space_scan,
+            cancel_space_scan
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Clarity Disk");

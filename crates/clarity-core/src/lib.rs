@@ -2,6 +2,7 @@
 
 mod cleanup;
 mod dashboard;
+mod space_scan;
 
 pub use cleanup::{
     AuditEvent, AuditEventKind, CleanupCandidate, CleanupError, CleanupPlan, CleanupPlanError,
@@ -10,4 +11,8 @@ pub use cleanup::{
 pub use dashboard::{
     CleanupSummary, DashboardError, DashboardSnapshot, DiskCategory, DiskCategoryKind, DiskHealth,
     DiskMetadata, DiskSummary, Suggestion, SuggestionRisk, VolumeHealthStatus,
+};
+pub use space_scan::{
+    SpaceScanEntry, SpaceScanError, SpaceScanProgress, SpaceScanRequest, SpaceScanSnapshot,
+    SpaceScanStart, SpaceScanStatus, SpaceScanTypeStat,
 };

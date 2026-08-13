@@ -47,6 +47,44 @@ export interface CleanupPlan {
   expiresAtUnixMs: number;
   sourceVolumeId: string | null;
 }
+/** Lifecycle states for a bounded read-only space scan. */
+export type SpaceScanStatus =
+  "idle" | "scanning" | "cancelled" | "completed" | "failed";
+/** User-selected scan scope and resource limits. */
+export interface SpaceScanRequest {
+  rootPath: string;
+  maxDepth: number;
+  maxEntries: number;
+}
+/** Progress of a space scan task. */
+export interface SpaceScanProgress {
+  scanId: string;
+  status: SpaceScanStatus;
+  scannedItems: number;
+  skippedItems: number;
+  bytesScanned: number;
+  currentPath: string | null;
+  message: string;
+}
+/** Largest file or directory entry reported by a space scan. */
+export interface SpaceScanEntry {
+  path: string;
+  bytes: number;
+  itemCount: number;
+  kind: string;
+}
+/** File extension aggregate reported by a space scan. */
+export interface SpaceScanTypeStat {
+  fileType: string;
+  bytes: number;
+  itemCount: number;
+}
+/** Pollable result of a space scan task. */
+export interface SpaceScanSnapshot {
+  progress: SpaceScanProgress;
+  largestEntries: SpaceScanEntry[];
+  fileTypes: SpaceScanTypeStat[];
+}
 /** Capacity attributed to a user-facing disk category. */
 export interface DiskCategory {
   kind: DiskCategoryKind;

@@ -11,6 +11,7 @@ import {
 } from "@lucide/vue";
 
 import DiskUsageCard from "@/components/DiskUsageCard.vue";
+import SpaceScanPanel from "@/components/SpaceScanPanel.vue";
 import DiskVolumeList from "@/components/DiskVolumeList.vue";
 import CleanupPreviewPanel from "@/components/CleanupPreviewPanel.vue";
 import MetricCard from "@/components/MetricCard.vue";
@@ -19,11 +20,15 @@ import {
   loadCleanupPreview,
   loadDashboardSnapshot,
   prepareCleanupPlan,
+  startSpaceScan,
+  getSpaceScan,
+  cancelSpaceScan,
 } from "@/services/dashboard-service";
 import type {
   CleanupPlan,
   CleanupPreview,
   DashboardSnapshot,
+  SpaceScanSnapshot,
 } from "@/types/dashboard";
 
 const snapshot = shallowRef<DashboardSnapshot>();
@@ -34,6 +39,9 @@ const cleanupPreview = shallowRef<CleanupPreview>();
 const isCleanupLoading = shallowRef(false);
 const cleanupPlan = shallowRef<CleanupPlan>();
 const isPreparingPlan = shallowRef(false);
+const spaceScan = shallowRef<SpaceScanSnapshot>();
+const isStartingSpaceScan = shallowRef(false);
+let activeSpaceScanId: string | undefined;
 const selectedDisk = computed(() => {
   if (!snapshot.value) {
     return undefined;
@@ -81,6 +89,27 @@ async function preparePlan(): Promise<void> {
   } finally {
     isPreparingPlan.value = false;
   }
+}
+
+/** Starts and polls a bounded read-only scan, stopping when it reaches a terminal state. */
+async function startSpaceAnalysis(): Promise<void> {
+  isStartingSpaceScan.value = true;
+  try {
+    const started = await startSpaceScan({
+      rootPath: "C:\\Users\\当前用户",
+      maxDepth: 6,
+      maxEntries: 100_000,
+    });
+    activeSpaceScanId = started.scanId;
+    spaceScan.value = await getSpaceScan(started.scanId);
+  } finally {
+    isStartingSpaceScan.value = false;
+  }
+}
+
+/** Requests cooperative cancellation of the active scan task. */
+async function stopSpaceAnalysis(): Promise<void> {
+  if (activeSpaceScanId) await cancelSpaceScan(activeSpaceScanId);
 }
 
 onMounted(async () => {
@@ -139,6 +168,13 @@ onMounted(async () => {
         :plan="cleanupPlan"
         :is-preparing-plan="isPreparingPlan"
         @prepare-plan="preparePlan"
+      />
+
+      <SpaceScanPanel
+        :snapshot="spaceScan"
+        :is-starting="isStartingSpaceScan"
+        @start-scan="startSpaceAnalysis"
+        @cancel-scan="stopSpaceAnalysis"
       />
 
       <div class="section-heading">

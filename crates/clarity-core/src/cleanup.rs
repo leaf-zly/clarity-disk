@@ -92,6 +92,9 @@ pub struct CleanupRuleStatus {
 /// A user-visible cleanup candidate found by a versioned rule.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+// These booleans are independent policy facts required by the UI and plan
+// digest (recoverability, elevation, quarantine eligibility, and selection).
+#[allow(clippy::struct_excessive_bools)]
 pub struct CleanupCandidate {
     /// Stable rule-scoped identifier for UI selection.
     pub id: String,

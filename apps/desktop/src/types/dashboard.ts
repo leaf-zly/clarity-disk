@@ -13,6 +13,7 @@ export interface ScanProgress {
   scannedItems: number;
   skippedItems: number;
   message: string;
+  sourceVolumeId: string | null;
 }
 /** Read-only cleanup candidate produced by a versioned rule. */
 export interface CleanupCandidate {
@@ -42,6 +43,9 @@ export interface CleanupPlan {
   candidates: CleanupCandidate[];
   planDigest: string;
   executionAuthorized: boolean;
+  createdAtUnixMs: number;
+  expiresAtUnixMs: number;
+  sourceVolumeId: string | null;
 }
 /** Capacity attributed to a user-facing disk category. */
 export interface DiskCategory {

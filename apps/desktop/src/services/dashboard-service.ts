@@ -47,6 +47,7 @@ export async function loadCleanupPreview(): Promise<CleanupPreview> {
       scannedItems: 361,
       skippedItems: 0,
       message: "清理扫描完成（仅预览）",
+      sourceVolumeId: "C:",
     },
     candidates: [
       candidate(
@@ -126,5 +127,8 @@ export async function prepareCleanupPlan(): Promise<CleanupPlan> {
     ),
     planDigest: "browser-fixture-plan-digest",
     executionAuthorized: false,
+    createdAtUnixMs: Date.now(),
+    expiresAtUnixMs: Date.now() + 10 * 60 * 1000,
+    sourceVolumeId: preview.scan.sourceVolumeId,
   };
 }

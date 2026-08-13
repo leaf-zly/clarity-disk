@@ -40,6 +40,7 @@ pub fn scan_cleanup_preview() -> Result<CleanupPreview, CleanupScanError> {
         scanned_items: 0,
         skipped_items: 0,
         message: "正在读取允许的清理目录".to_owned(),
+        source_volume_id: std::env::var("SystemDrive").ok(),
     };
     let mut candidates = Vec::new();
     let mut scanned_items = 0_u64;

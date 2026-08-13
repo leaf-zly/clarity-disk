@@ -4,8 +4,8 @@ mod cleanup;
 mod dashboard;
 
 pub use cleanup::{
-    CleanupCandidate, CleanupError, CleanupPlan, CleanupPlanError, CleanupPreview, ScanProgress,
-    ScanStatus,
+    AuditEvent, AuditEventKind, CleanupCandidate, CleanupError, CleanupPlan, CleanupPlanError,
+    CleanupPreview, ScanProgress, ScanStatus,
 };
 pub use dashboard::{
     CleanupSummary, DashboardError, DashboardSnapshot, DiskCategory, DiskCategoryKind, DiskHealth,

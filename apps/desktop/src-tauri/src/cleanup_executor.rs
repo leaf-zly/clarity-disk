@@ -330,7 +330,7 @@ fn tree_is_safe(path: &Path, metadata: &fs::Metadata) -> bool {
     if !metadata.is_dir() {
         return true;
     }
-    let Ok(entries) = fs::read_dir(path) else {
+    let Ok(mut entries) = fs::read_dir(path) else {
         return false;
     };
     entries.all(|item| {

@@ -522,6 +522,17 @@ fn evaluate_signals(
     completeness: HealthDataCompleteness,
 ) -> Vec<DiskHealthSignal> {
     let mut signals = Vec::new();
+    append_offline_signal(input, &mut signals);
+    append_provider_signal(input, &mut signals);
+    append_smart_signal(input, &mut signals);
+    append_temperature_signal(input, &mut signals);
+    append_wear_signal(input, &mut signals);
+    append_error_signal(input, &mut signals);
+    append_completeness_signals(input, completeness, &mut signals);
+    signals
+}
+
+fn append_offline_signal(input: &PhysicalDiskHealthInput, signals: &mut Vec<DiskHealthSignal>) {
     if input.is_offline {
         signals.push(signal(
             DiskHealthSignalCode::DiskOffline,
@@ -531,6 +542,9 @@ fn evaluate_signals(
             "保持停止写入，检查连接并先备份可访问的数据。",
         ));
     }
+}
+
+fn append_provider_signal(input: &PhysicalDiskHealthInput, signals: &mut Vec<DiskHealthSignal>) {
     match input.provider_health {
         ProviderHealthStatus::Unhealthy => signals.push(signal(
             DiskHealthSignalCode::ProviderUnhealthy,
@@ -555,6 +569,9 @@ fn evaluate_signals(
         )),
         ProviderHealthStatus::Healthy => {}
     }
+}
+
+fn append_smart_signal(input: &PhysicalDiskHealthInput, signals: &mut Vec<DiskHealthSignal>) {
     match input.smart_status {
         SmartHealthStatus::Failed => signals.push(signal(
             DiskHealthSignalCode::SmartFailure,
@@ -579,6 +596,9 @@ fn evaluate_signals(
         )),
         SmartHealthStatus::Passed => {}
     }
+}
+
+fn append_temperature_signal(input: &PhysicalDiskHealthInput, signals: &mut Vec<DiskHealthSignal>) {
     if let Some(temperature) = input.temperature_celsius {
         if temperature >= 70 {
             signals.push(signal(
@@ -598,6 +618,9 @@ fn evaluate_signals(
             ));
         }
     }
+}
+
+fn append_wear_signal(input: &PhysicalDiskHealthInput, signals: &mut Vec<DiskHealthSignal>) {
     if let Some(wear) = input.wear_percent_used {
         if wear >= 90 {
             signals.push(signal(
@@ -617,6 +640,9 @@ fn evaluate_signals(
             ));
         }
     }
+}
+
+fn append_error_signal(input: &PhysicalDiskHealthInput, signals: &mut Vec<DiskHealthSignal>) {
     let uncorrected = input
         .read_errors_uncorrected
         .unwrap_or(0)
@@ -644,6 +670,13 @@ fn evaluate_signals(
             ));
         }
     }
+}
+
+fn append_completeness_signals(
+    input: &PhysicalDiskHealthInput,
+    completeness: HealthDataCompleteness,
+    signals: &mut Vec<DiskHealthSignal>,
+) {
     if input.identity_mapping == IdentityMappingConfidence::Unknown {
         signals.push(signal(
             DiskHealthSignalCode::IdentityMappingUnknown,
@@ -662,7 +695,6 @@ fn evaluate_signals(
             "不可用字段不会被推断为正常；可使用厂商工具补充检查。",
         ));
     }
-    signals
 }
 
 fn signal(

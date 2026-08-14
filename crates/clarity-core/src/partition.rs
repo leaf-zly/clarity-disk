@@ -91,30 +91,7 @@ impl PartitionTopology {
         check_partition_safety(source, &mut checks, &mut blockers);
         check_partition_safety(target, &mut checks, &mut blockers);
 
-        let migration_bytes = source.used_bytes;
-        record_check(
-            &mut checks,
-            &mut blockers,
-            MergeCheckCode::MigrationSizeKnown,
-            migration_bytes.is_some(),
-            "已读取需要迁移的数据量",
-            "无法读取源分区已用空间，请刷新拓扑或先运行文件系统检查",
-            MergeBlockerCode::MigrationSizeUnknown,
-            Some(source.id.clone()),
-        );
-        let migration_headroom = migration_bytes
-            .zip(target.free_bytes)
-            .is_some_and(|(migration, free)| free >= migration.saturating_add(migration / 20));
-        record_check(
-            &mut checks,
-            &mut blockers,
-            MergeCheckCode::TargetMigrationHeadroom,
-            migration_headroom,
-            "目标分区有足够迁移空间并保留 5% 安全余量",
-            "目标分区剩余空间不足或不可确认，不能容纳源分区数据与安全余量",
-            MergeBlockerCode::TargetMigrationSpaceInsufficient,
-            Some(target.id.clone()),
-        );
+        let migration_bytes = check_migration_capacity(source, target, &mut checks, &mut blockers);
 
         deduplicate_blockers(&mut blockers);
         let feasible = blockers.is_empty();
@@ -163,6 +140,39 @@ impl PartitionTopology {
         }
         Ok(partition)
     }
+}
+
+fn check_migration_capacity(
+    source: &PartitionDescriptor,
+    target: &PartitionDescriptor,
+    checks: &mut Vec<MergeCheck>,
+    blockers: &mut Vec<MergeBlocker>,
+) -> Option<u64> {
+    let migration_bytes = source.used_bytes;
+    record_check(
+        checks,
+        blockers,
+        MergeCheckCode::MigrationSizeKnown,
+        migration_bytes.is_some(),
+        "已读取需要迁移的数据量",
+        "无法读取源分区已用空间，请刷新拓扑或先运行文件系统检查",
+        MergeBlockerCode::MigrationSizeUnknown,
+        Some(source.id.clone()),
+    );
+    let has_headroom = migration_bytes
+        .zip(target.free_bytes)
+        .is_some_and(|(migration, free)| free >= migration.saturating_add(migration / 20));
+    record_check(
+        checks,
+        blockers,
+        MergeCheckCode::TargetMigrationHeadroom,
+        has_headroom,
+        "目标分区有足够迁移空间并保留 5% 安全余量",
+        "目标分区剩余空间不足或不可确认，不能容纳源分区数据与安全余量",
+        MergeBlockerCode::TargetMigrationSpaceInsufficient,
+        Some(target.id.clone()),
+    );
+    migration_bytes
 }
 
 /// Read-only physical disk metadata used to group partition identities.

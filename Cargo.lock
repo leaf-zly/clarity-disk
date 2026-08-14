@@ -336,6 +336,7 @@ name = "clarity-disk"
 version = "0.1.0"
 dependencies = [
  "clarity-core",
+ "clarity-privileged-protocol",
  "getrandom 0.3.4",
  "serde",
  "serde_json",
@@ -343,6 +344,30 @@ dependencies = [
  "sysinfo",
  "tauri",
  "tauri-build",
+ "thiserror 2.0.20",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "clarity-privileged-protocol"
+version = "0.1.0"
+dependencies = [
+ "clarity-core",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "clarity-privileged-service"
+version = "0.1.0"
+dependencies = [
+ "clarity-core",
+ "clarity-privileged-protocol",
+ "serde",
+ "serde_json",
+ "sha2",
  "thiserror 2.0.20",
  "windows-sys 0.61.2",
 ]

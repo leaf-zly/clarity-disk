@@ -102,6 +102,19 @@ impl PartitionTopology {
             MergeBlockerCode::MigrationSizeUnknown,
             Some(source.id.clone()),
         );
+        let migration_headroom = migration_bytes
+            .zip(target.free_bytes)
+            .is_some_and(|(migration, free)| free >= migration.saturating_add(migration / 20));
+        record_check(
+            &mut checks,
+            &mut blockers,
+            MergeCheckCode::TargetMigrationHeadroom,
+            migration_headroom,
+            "目标分区有足够迁移空间并保留 5% 安全余量",
+            "目标分区剩余空间不足或不可确认，不能容纳源分区数据与安全余量",
+            MergeBlockerCode::TargetMigrationSpaceInsufficient,
+            Some(target.id.clone()),
+        );
 
         deduplicate_blockers(&mut blockers);
         let feasible = blockers.is_empty();
@@ -115,8 +128,11 @@ impl PartitionTopology {
             preview_id,
             topology_captured_at_unix_ms: self.captured_at_unix_ms,
             disk_id: target.disk_id.clone(),
+            disk_number: disk.map_or(u32::MAX, |disk| disk.number),
             source_partition_id: source.id.clone(),
             target_partition_id: target.id.clone(),
+            source_identity: PartitionExecutionIdentity::from_descriptor(source),
+            target_identity: PartitionExecutionIdentity::from_descriptor(target),
             feasible,
             execution_authorized: false,
             risk_level: MergeRiskLevel::High,
@@ -355,10 +371,16 @@ pub struct MergePreview {
     pub topology_captured_at_unix_ms: u64,
     /// Physical disk identity involved in the request.
     pub disk_id: String,
+    /// Windows disk number captured for privileged rediscovery, never trusted alone.
+    pub disk_number: u32,
     /// Evaluated source partition identity.
     pub source_partition_id: String,
     /// Evaluated target partition identity.
     pub target_partition_id: String,
+    /// Complete source identity that a privileged executor must rediscover exactly.
+    pub source_identity: PartitionExecutionIdentity,
+    /// Complete target identity that a privileged executor must rediscover exactly.
+    pub target_identity: PartitionExecutionIdentity,
     /// Whether all conservative P6 checks passed.
     pub feasible: bool,
     /// Always false; P6 exposes no partition writer or authorization token.
@@ -379,6 +401,40 @@ pub struct MergePreview {
     pub simulated_layout: Option<SimulatedPartitionLayout>,
     /// User-visible statement that the result is not an execution approval.
     pub disclaimer: String,
+}
+
+/// Safety-relevant partition identity captured for privileged rediscovery.
+///
+/// Drive letters and paths are deliberately absent. A privileged adapter must
+/// resolve the current access path from this GUID, number, offset and capacity.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PartitionExecutionIdentity {
+    /// Stable backend identity used by the non-privileged discovery layer.
+    pub partition_id: String,
+    /// GPT partition GUID; execution is impossible when discovery omitted it.
+    pub guid: Option<String>,
+    /// Windows partition number captured with the immutable plan.
+    pub partition_number: u32,
+    /// Exact byte offset from the beginning of the physical disk.
+    pub start_offset_bytes: u64,
+    /// Exact captured capacity in bytes.
+    pub size_bytes: u64,
+    /// Captured free capacity used to prove migration headroom on the target.
+    pub free_bytes: Option<u64>,
+}
+
+impl PartitionExecutionIdentity {
+    fn from_descriptor(partition: &PartitionDescriptor) -> Self {
+        Self {
+            partition_id: partition.id.clone(),
+            guid: partition.guid.clone(),
+            partition_number: partition.partition_number,
+            start_offset_bytes: partition.start_offset_bytes,
+            size_bytes: partition.size_bytes,
+            free_bytes: partition.free_bytes,
+        }
+    }
 }
 
 /// Risk levels presented by the read-only preview.
@@ -429,6 +485,8 @@ pub enum MergeCheckCode {
     PartitionHealthyAndOnline,
     /// Source used bytes must be known.
     MigrationSizeKnown,
+    /// Target free space must cover source data plus a five-percent reserve.
+    TargetMigrationHeadroom,
 }
 
 /// An actionable blocker with a recovery recommendation.
@@ -475,6 +533,8 @@ pub enum MergeBlockerCode {
     PartitionNotHealthyOrOnline,
     /// Source used-space counters were unavailable.
     MigrationSizeUnknown,
+    /// Target free capacity is unknown or insufficient for verified migration.
+    TargetMigrationSpaceInsufficient,
 }
 
 /// Simulated disk layout after a feasible source-to-target merge.
@@ -680,6 +740,9 @@ fn recovery_suggestion(code: MergeBlockerCode) -> &'static str {
         MergeBlockerCode::SnapshotStateUnsafe => "在确认备份策略后核验卷影副本状态。",
         MergeBlockerCode::PartitionNotHealthyOrOnline => "先修复卷状态并确认磁盘健康。",
         MergeBlockerCode::MigrationSizeUnknown => "挂载并检查源卷，然后重新读取拓扑。",
+        MergeBlockerCode::TargetMigrationSpaceInsufficient => {
+            "先释放目标分区空间，至少覆盖源数据量及 5% 安全余量。"
+        }
     }
 }
 
@@ -902,6 +965,23 @@ mod tests {
                     .any(|blocker| blocker.code == expected)
             );
         }
+    }
+
+    #[test]
+    fn blocks_target_without_verified_migration_headroom() {
+        let mut target = data_partition("target", "disk-0", 100, 100);
+        target.free_bytes = Some(10);
+        let source = data_partition("source", "disk-0", 200, 100);
+        let preview = topology(vec![disk("disk-0", vec![target, source])])
+            .preview_merge(&request("source", "target"))
+            .expect("insufficient capacity should return an explained preview");
+
+        assert!(
+            preview.blockers.iter().any(|blocker| {
+                blocker.code == MergeBlockerCode::TargetMigrationSpaceInsufficient
+            })
+        );
+        assert!(preview.simulated_layout.is_none());
     }
 
     #[test]

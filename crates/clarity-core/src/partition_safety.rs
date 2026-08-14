@@ -8,7 +8,7 @@ use thiserror::Error;
 
 use crate::MergePreview;
 
-const PLAN_SCHEMA_VERSION: u16 = 1;
+const PLAN_SCHEMA_VERSION: u16 = 2;
 const RECOVERY_SCHEMA_VERSION: u16 = 1;
 const PLAN_LIFETIME_MS: u64 = 5 * 60 * 1_000;
 const EVIDENCE_MAX_AGE_MS: u64 = 60 * 1_000;
@@ -91,14 +91,26 @@ pub struct ImmutablePartitionPlan {
     pub operation: PartitionOperationKind,
     /// Stable physical-disk identity.
     pub disk_id: String,
+    /// Windows disk number captured for an exact multi-field rediscovery match.
+    pub disk_number: u32,
     /// Stable source-partition identity.
     pub source_partition_id: String,
     /// Stable target-partition identity.
     pub target_partition_id: String,
+    /// Source GUID, number, offset, size and free-space snapshot.
+    pub source_identity: crate::PartitionExecutionIdentity,
+    /// Target GUID, number, offset, size and free-space snapshot.
+    pub target_identity: crate::PartitionExecutionIdentity,
     /// Data bytes a future implementation would need to migrate.
     pub migration_bytes: u64,
     /// Version of the recovery journal state machine.
     pub recovery_schema_version: u16,
+    /// Stable-power evidence bound into the plan for broker revalidation.
+    pub external_power_state: ExternalPowerState,
+    /// Pending-restart evidence bound into the serialized plan.
+    pub pending_restart_state: PendingRestartState,
+    /// Independent backup conclusion; the broker only accepts `Verified`.
+    pub backup_evidence_state: BackupEvidenceState,
 }
 
 /// Enumerated future partition operations; arbitrary commands are impossible.
@@ -187,10 +199,16 @@ fn build_immutable_plan(
         expires_at_unix_ms,
         operation: PartitionOperationKind::MergeAdjacentDataPartitions,
         disk_id: preview.disk_id.clone(),
+        disk_number: preview.disk_number,
         source_partition_id: preview.source_partition_id.clone(),
         target_partition_id: preview.target_partition_id.clone(),
+        source_identity: preview.source_identity.clone(),
+        target_identity: preview.target_identity.clone(),
         migration_bytes: preview.migration_bytes,
         recovery_schema_version: RECOVERY_SCHEMA_VERSION,
+        external_power_state: evidence.external_power_state,
+        pending_restart_state: evidence.pending_restart_state,
+        backup_evidence_state: evidence.backup_evidence_state,
     };
     plan.plan_digest = plan_digest(&plan, preview.feasible, evidence);
     Ok(plan)
@@ -567,7 +585,7 @@ fn plan_digest(
     evidence: &PartitionSafetyEvidence,
 ) -> String {
     let source = format!(
-        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{:?}|{:?}|{:?}",
+        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{:?}|{}|{}|{}|{:?}|{:?}|{}|{}|{}|{:?}|{}|{:?}|{:?}|{:?}",
         plan.schema_version,
         plan.preview_id,
         plan.topology_captured_at_unix_ms,
@@ -575,8 +593,19 @@ fn plan_digest(
         plan.created_at_unix_ms,
         plan.expires_at_unix_ms,
         plan.disk_id,
+        plan.disk_number,
         plan.source_partition_id,
         plan.target_partition_id,
+        plan.source_identity.guid,
+        plan.source_identity.partition_number,
+        plan.source_identity.start_offset_bytes,
+        plan.source_identity.size_bytes,
+        plan.source_identity.free_bytes,
+        plan.target_identity.guid,
+        plan.target_identity.partition_number,
+        plan.target_identity.start_offset_bytes,
+        plan.target_identity.size_bytes,
+        plan.target_identity.free_bytes,
         plan.migration_bytes,
         evidence.external_power_state,
         evidence.pending_restart_state,
@@ -630,8 +659,25 @@ mod tests {
             preview_id: "preview-digest".to_owned(),
             topology_captured_at_unix_ms: 9_990,
             disk_id: "disk-0".to_owned(),
+            disk_number: 0,
             source_partition_id: "source".to_owned(),
             target_partition_id: "target".to_owned(),
+            source_identity: crate::PartitionExecutionIdentity {
+                partition_id: "source".to_owned(),
+                guid: Some("source-guid".to_owned()),
+                partition_number: 2,
+                start_offset_bytes: 50,
+                size_bytes: 50,
+                free_bytes: Some(8),
+            },
+            target_identity: crate::PartitionExecutionIdentity {
+                partition_id: "target".to_owned(),
+                guid: Some("target-guid".to_owned()),
+                partition_number: 1,
+                start_offset_bytes: 0,
+                size_bytes: 50,
+                free_bytes: Some(42),
+            },
             feasible,
             execution_authorized: false,
             risk_level: MergeRiskLevel::High,

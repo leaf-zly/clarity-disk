@@ -11,6 +11,7 @@ import {
   Settings2,
   ShieldCheck,
   Sparkles,
+  Wrench,
 } from "@lucide/vue";
 
 /**
@@ -50,6 +51,7 @@ const diskItems: readonly NavigationItem[] = [
 ];
 
 const secondaryItems: readonly NavigationItem[] = [
+  { id: "maintenance", label: "管理员维护", icon: Wrench },
   { id: "recovery", label: "恢复中心", icon: RotateCcw },
   { id: "settings", label: "设置", icon: Settings2 },
 ];

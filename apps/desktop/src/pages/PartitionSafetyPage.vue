@@ -12,9 +12,15 @@ import {
   RefreshCw,
   RotateCcw,
   ShieldCheck,
+  UnlockKeyhole,
 } from "@lucide/vue";
 
 import { assessPartitionMergeSafety } from "@/services/partition-safety-service";
+import {
+  executePrivilegedOperation,
+  getPrivilegedCapabilities,
+  preparePartitionExecution,
+} from "@/services/privileged-service";
 import {
   loadPartitionTopology,
   previewPartitionMerge,
@@ -27,6 +33,11 @@ import type {
   PhysicalDisk,
 } from "@/types/partition";
 import { formatBytes } from "@/utils/format-bytes";
+import type {
+  PrivilegedCapabilities,
+  PrivilegedExecutionChallenge,
+  PrivilegedExecutionReport,
+} from "@/types/privileged";
 
 const topology = shallowRef<PartitionTopology>();
 const preview = shallowRef<MergePreview>();
@@ -36,8 +47,15 @@ const targetPartitionId = shallowRef<string>();
 const sourcePartitionId = shallowRef<string>();
 const loadError = shallowRef<string>();
 const assessmentError = shallowRef<string>();
+const executionMessage = shallowRef<string>();
+const executionConfirmation = shallowRef("");
+const executionChallenge = shallowRef<PrivilegedExecutionChallenge>();
+const executionReport = shallowRef<PrivilegedExecutionReport>();
+const capabilities = shallowRef<PrivilegedCapabilities>();
 const isLoading = shallowRef(true);
 const isAssessing = shallowRef(false);
+const isPreparingExecution = shallowRef(false);
+const isExecuting = shallowRef(false);
 
 const selectedDisk = computed(() =>
   topology.value?.disks.find((disk) => disk.id === selectedDiskId.value),
@@ -52,7 +70,14 @@ const canAssess = computed(
     !isAssessing.value,
 );
 
-onMounted(() => void refreshTopology());
+onMounted(() => {
+  void refreshTopology();
+  void loadCapabilities();
+});
+
+async function loadCapabilities(): Promise<void> {
+  capabilities.value = await getPrivilegedCapabilities().catch(() => undefined);
+}
 
 async function refreshTopology(): Promise<void> {
   isLoading.value = true;
@@ -145,6 +170,54 @@ function invalidateAssessment(): void {
   preview.value = undefined;
   assessment.value = undefined;
   assessmentError.value = undefined;
+  executionMessage.value = undefined;
+  executionChallenge.value = undefined;
+  executionReport.value = undefined;
+  executionConfirmation.value = "";
+}
+
+async function prepareRealExecution(): Promise<void> {
+  if (!targetPartitionId.value || !sourcePartitionId.value) return;
+  isPreparingExecution.value = true;
+  executionMessage.value = undefined;
+  executionChallenge.value = undefined;
+  try {
+    const preparation = await preparePartitionExecution({
+      targetPartitionId: targetPartitionId.value,
+      sourcePartitionId: sourcePartitionId.value,
+    });
+    assessment.value = preparation.assessment;
+    executionChallenge.value = preparation.challenge ?? undefined;
+    if (!preparation.challenge)
+      executionMessage.value =
+        "执行门禁未全部通过：需要已验证独立备份、双重功能开关和全部新鲜安全证据。";
+  } catch {
+    executionMessage.value = "执行准备失败，未请求管理员权限，也未修改磁盘。";
+  } finally {
+    isPreparingExecution.value = false;
+  }
+}
+
+async function executeRealMerge(): Promise<void> {
+  const current = executionChallenge.value;
+  if (!current || executionConfirmation.value !== current.confirmationPhrase)
+    return;
+  isExecuting.value = true;
+  executionMessage.value = undefined;
+  try {
+    executionReport.value = await executePrivilegedOperation({
+      challengeId: current.challengeId,
+      confirmationToken: current.confirmationToken,
+      confirmationPhrase: executionConfirmation.value,
+    });
+    executionChallenge.value = undefined;
+    executionConfirmation.value = "";
+  } catch {
+    executionMessage.value =
+      "管理员执行没有完成。请根据安全停止或恢复日志检查状态，禁止直接重试。";
+  } finally {
+    isExecuting.value = false;
+  }
 }
 
 function isDataPartition(partition: PartitionDescriptor): boolean {
@@ -172,7 +245,7 @@ function partitionName(partitionId: string | undefined): string {
           <ShieldCheck :size="14" aria-hidden="true" />计划七
         </span>
         <h1 id="safety-page-title">分区安全基础</h1>
-        <p>生成不可变计划并验证写入前条件。当前版本没有分区写入能力。</p>
+        <p>生成不可变计划，并在全部门禁通过后交给独立管理员代理执行。</p>
       </div>
       <button
         class="secondary-button"
@@ -193,13 +266,19 @@ function partitionName(partitionId: string | undefined): string {
     <section class="boundary-banner">
       <LockKeyhole :size="20" aria-hidden="true" />
       <div>
-        <strong>写入能力未安装</strong>
+        <strong>{{
+          capabilities?.serviceAvailable ? "独立管理员边界" : "写入能力未安装"
+        }}</strong>
         <p>
-          本页只评估拓扑、供电、待重启、备份和恢复协议，不创建执行令牌，也不调用
-          diskpart。
+          UI
+          不接收路径或命令；执行器使用编译与管理员运行时双门禁，当前阻塞不会被绕过。
         </p>
       </div>
-      <span>execution = false</span>
+      <span>{{
+        capabilities?.partitionWriterRuntimeEnabled
+          ? "experimental"
+          : "execution = false"
+      }}</span>
     </section>
 
     <div v-if="loadError" class="state-card error-card" role="alert">
@@ -330,8 +409,10 @@ function partitionName(partitionId: string | undefined): string {
             </div>
           </div>
           <div class="authorization-state">
-            <span>执行授权</span><strong>未授权</strong> <span>写入能力</span
-            ><strong>不存在</strong>
+            <span>执行授权</span><strong>未授权</strong> <span>运行时门禁</span
+            ><strong>{{
+              capabilities?.partitionWriterRuntimeEnabled ? "已启用" : "关闭"
+            }}</strong>
           </div>
         </section>
 
@@ -433,6 +514,54 @@ function partitionName(partitionId: string | undefined): string {
                 <p>{{ blocker.recoverySuggestion }}</p>
               </div>
             </article>
+          </div>
+        </section>
+
+        <section class="surface execution-card">
+          <div class="section-heading">
+            <div>
+              <span class="section-kicker">计划九 · 真实执行</span>
+              <h2>重新发现并检查全部执行门禁</h2>
+            </div>
+            <UnlockKeyhole :size="20" aria-hidden="true" />
+          </div>
+          <p>
+            该步骤仍不直接写盘；只有独立备份验证、计划摘要、身份、供电、重启状态和双重开关全部通过，才返回两分钟一次性确认。
+          </p>
+          <button
+            class="secondary-button execution-prepare"
+            type="button"
+            :disabled="isPreparingExecution || isExecuting"
+            @click="prepareRealExecution"
+          >
+            <LoaderCircle v-if="isPreparingExecution" class="spin" :size="16" />
+            {{
+              isPreparingExecution ? "正在检查执行门禁" : "检查计划九执行门禁"
+            }}
+          </button>
+          <p v-if="executionMessage" class="inline-error" role="status">
+            {{ executionMessage }}
+          </p>
+          <p v-if="executionReport" class="execution-result" role="status">
+            {{ executionReport.message }}
+          </p>
+          <div v-if="executionChallenge" class="execution-confirmation">
+            <strong>{{ executionChallenge.impact }}</strong>
+            <label>
+              <span>请输入：{{ executionChallenge.confirmationPhrase }}</span>
+              <input v-model="executionConfirmation" autocomplete="off" />
+            </label>
+            <button
+              data-action="execute"
+              type="button"
+              :disabled="
+                executionConfirmation !==
+                  executionChallenge.confirmationPhrase || isExecuting
+              "
+              @click="executeRealMerge"
+            >
+              {{ isExecuting ? "等待管理员服务" : "确认并执行真实合并" }}
+            </button>
           </div>
         </section>
       </template>
@@ -602,7 +731,8 @@ function partitionName(partitionId: string | undefined): string {
 .plan-card,
 .recovery-card,
 .checks-card,
-.blockers-card {
+.blockers-card,
+.execution-card {
   padding: 21px;
 }
 .section-heading {
@@ -766,8 +896,57 @@ select {
   line-height: 1.55;
 }
 .checks-card,
-.blockers-card {
+.blockers-card,
+.execution-card {
   margin-top: 14px;
+}
+.execution-card > p {
+  color: var(--color-text-secondary);
+  font-size: 0.76rem;
+  line-height: 1.55;
+}
+.execution-prepare {
+  width: 100%;
+  margin-top: 14px;
+}
+.execution-result {
+  margin-top: 10px;
+  color: var(--color-green) !important;
+}
+.execution-confirmation {
+  display: grid;
+  grid-template-columns: 1fr minmax(250px, 0.7fr) 210px;
+  align-items: end;
+  gap: 14px;
+  padding-top: 15px;
+  margin-top: 15px;
+  border-top: 1px solid var(--color-border);
+}
+.execution-confirmation strong {
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+.execution-confirmation label {
+  display: grid;
+  gap: 6px;
+  color: var(--color-text-secondary);
+  font-size: 0.7rem;
+}
+.execution-confirmation input {
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  color: var(--color-text);
+  background: var(--color-surface-muted);
+}
+.execution-confirmation button {
+  min-height: 38px;
+  border: 0;
+  border-radius: 10px;
+  color: white;
+  background: var(--color-orange);
+  font-weight: 650;
 }
 .checks-card ul {
   display: grid;
@@ -842,6 +1021,9 @@ select {
   .outcome-card {
     align-items: flex-start;
     flex-direction: column;
+  }
+  .execution-confirmation {
+    grid-template-columns: 1fr;
   }
 }
 @media (max-width: 700px) {

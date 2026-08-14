@@ -17,7 +17,7 @@
     "test": "pnpm --filter @clarity-disk/desktop test",
     "test:coverage": "pnpm --filter @clarity-disk/desktop test:coverage",
     "typecheck": "pnpm --filter @clarity-disk/desktop typecheck",
-    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && cargo fmt --all --check && cargo clippy --workspace --all-targets --locked -- -D warnings && cargo test --workspace --locked"
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && cargo fmt --all --check && cargo clippy --workspace --all-targets --all-features --locked -- -D warnings && cargo test --workspace --all-features --locked"
   },
   "devDependencies": {
     "prettier": "3.9.6"

@@ -1,5 +1,10 @@
 [workspace]
-members = ["apps/desktop/src-tauri", "crates/clarity-core"]
+members = [
+  "apps/desktop/src-tauri",
+  "apps/privileged-service",
+  "crates/clarity-core",
+  "crates/clarity-privileged-protocol",
+]
 resolver = "3"
 
 [workspace.package]
@@ -12,6 +17,7 @@ repository = "https://github.com/leaf-zly/clarity-disk"
 
 [workspace.dependencies]
 clarity-core = { path = "crates/clarity-core" }
+clarity-privileged-protocol = { path = "crates/clarity-privileged-protocol" }
 getrandom = "0.3.4"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"

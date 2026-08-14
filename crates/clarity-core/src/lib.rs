@@ -32,8 +32,9 @@ pub use health::{
 pub use partition::{
     DiskLayoutKind, EncryptionState, MediaErrorState, MergeBlocker, MergeBlockerCode, MergeCheck,
     MergeCheckCode, MergePreview, MergePreviewRequest, MergeRiskLevel, PartitionDescriptor,
-    PartitionKind, PartitionOperationalState, PartitionPreviewError, PartitionTopology,
-    PhysicalDisk, SimulatedPartition, SimulatedPartitionLayout, SnapshotState, TopologyHealth,
+    PartitionExecutionIdentity, PartitionKind, PartitionOperationalState, PartitionPreviewError,
+    PartitionTopology, PhysicalDisk, SimulatedPartition, SimulatedPartitionLayout, SnapshotState,
+    TopologyHealth,
 };
 pub use partition_safety::{
     BackupEvidenceState, ExternalPowerState, ImmutablePartitionPlan, PartitionOperationKind,

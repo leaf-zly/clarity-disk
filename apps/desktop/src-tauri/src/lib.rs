@@ -12,12 +12,14 @@ mod disk_discovery;
 mod disk_health_discovery;
 mod partition_discovery;
 mod partition_safety_discovery;
+mod privileged_workflow;
 mod quarantine_store;
 mod space_scan;
 mod state_store;
 
 static SPACE_SCANS: OnceLock<space_scan::SpaceScanManager> = OnceLock::new();
 static CLEANUP_WORKFLOW: OnceLock<cleanup_workflow::CleanupWorkflow> = OnceLock::new();
+static PRIVILEGED_WORKFLOW: OnceLock<privileged_workflow::PrivilegedWorkflow> = OnceLock::new();
 
 const GIB: u64 = 1024 * 1024 * 1024;
 const MIB: u64 = 1024 * 1024;
@@ -272,16 +274,72 @@ fn preview_partition_merge(
 fn assess_partition_merge_safety(
     request: clarity_core::MergePreviewRequest,
 ) -> Result<clarity_core::PartitionSafetyAssessment, String> {
+    build_partition_safety_assessment(&request)
+}
+
+fn build_partition_safety_assessment(
+    request: &clarity_core::MergePreviewRequest,
+) -> Result<clarity_core::PartitionSafetyAssessment, String> {
     let topology =
         partition_discovery::discover_partition_topology().map_err(|error| error.to_string())?;
     let preview = topology
-        .preview_merge(&request)
+        .preview_merge(request)
         .map_err(|error| error.to_string())?;
     let evidence = partition_safety_discovery::discover_partition_safety_evidence()
         .map_err(|error| error.to_string())?;
     let now_unix_ms = evidence.captured_at_unix_ms;
     clarity_core::PartitionSafetyAssessment::try_new(&preview, evidence, now_unix_ms)
         .map_err(|error| error.to_string())
+}
+
+/// Returns the installed one-shot administrator broker capability handshake.
+#[tauri::command]
+fn get_privileged_capabilities() -> clarity_privileged_protocol::PrivilegedCapabilities {
+    PRIVILEGED_WORKFLOW
+        .get_or_init(privileged_workflow::PrivilegedWorkflow::default)
+        .capabilities()
+}
+
+/// Issues a one-time challenge for one fixed privileged maintenance adapter.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn prepare_maintenance_execution(
+    request: privileged_workflow::PrepareMaintenanceRequest,
+) -> Result<privileged_workflow::PrivilegedExecutionChallenge, String> {
+    PRIVILEGED_WORKFLOW
+        .get_or_init(privileged_workflow::PrivilegedWorkflow::default)
+        .prepare_maintenance(request.operation)
+}
+
+/// Re-discovers partition evidence and prepares execution only when all gates pass.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn prepare_partition_execution(
+    request: clarity_core::MergePreviewRequest,
+) -> Result<privileged_workflow::PartitionExecutionPreparation, String> {
+    let assessment = build_partition_safety_assessment(&request)?;
+    PRIVILEGED_WORKFLOW
+        .get_or_init(privileged_workflow::PrivilegedWorkflow::default)
+        .prepare_partition(assessment)
+}
+
+/// Consumes a one-time challenge and crosses the Windows UAC boundary.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn execute_privileged_operation(
+    request: privileged_workflow::ExecutePrivilegedRequest,
+) -> Result<clarity_privileged_protocol::PrivilegedExecutionReport, String> {
+    PRIVILEGED_WORKFLOW
+        .get_or_init(privileged_workflow::PrivilegedWorkflow::default)
+        .execute(&request)
+}
+
+/// Returns newest privacy-preserving privileged terminal events.
+#[tauri::command]
+fn get_privileged_audit_events() -> Vec<privileged_workflow::PrivilegedAuditEvent> {
+    PRIVILEGED_WORKFLOW
+        .get_or_init(privileged_workflow::PrivilegedWorkflow::default)
+        .audit_events()
 }
 
 /// Starts the desktop runtime and registers the minimal command surface.
@@ -314,7 +372,12 @@ pub fn run() {
             get_disk_health_snapshot,
             get_partition_topology,
             preview_partition_merge,
-            assess_partition_merge_safety
+            assess_partition_merge_safety,
+            get_privileged_capabilities,
+            prepare_maintenance_execution,
+            prepare_partition_execution,
+            execute_privileged_operation,
+            get_privileged_audit_events
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Clarity Disk");

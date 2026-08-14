@@ -1,35 +1,29 @@
 [package]
-name = "clarity-disk"
+name = "clarity-privileged-service"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "Safe Windows disk management and cleanup"
+description = "One-shot least-privilege Windows broker for Clarity Disk"
 
-[lib]
-name = "clarity_disk_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
-
-[build-dependencies]
-tauri-build = { version = "2.6.3", features = [] }
+[features]
+default = []
+partition-writes = []
 
 [dependencies]
 clarity-core.workspace = true
 clarity-privileged-protocol.workspace = true
-getrandom.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
-sysinfo = { version = "0.37.2", default-features = false, features = ["disk"] }
-tauri.workspace = true
 thiserror.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = [
   "Win32_Foundation",
-  "Win32_System_Registry",
+  "Win32_Security",
+  "Win32_System_SystemInformation",
   "Win32_System_Threading",
-  "Win32_UI_Shell",
 ] }
 
 [lints]

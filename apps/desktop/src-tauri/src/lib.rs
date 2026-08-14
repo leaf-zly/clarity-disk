@@ -11,6 +11,7 @@ mod cleanup_workflow;
 mod disk_discovery;
 mod disk_health_discovery;
 mod partition_discovery;
+mod partition_safety_discovery;
 mod quarantine_store;
 mod space_scan;
 mod state_store;
@@ -265,6 +266,24 @@ fn preview_partition_merge(
         .map_err(|error| error.to_string())
 }
 
+/// Re-discovers topology and system evidence to build a non-authorizing safety plan.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn assess_partition_merge_safety(
+    request: clarity_core::MergePreviewRequest,
+) -> Result<clarity_core::PartitionSafetyAssessment, String> {
+    let topology =
+        partition_discovery::discover_partition_topology().map_err(|error| error.to_string())?;
+    let preview = topology
+        .preview_merge(&request)
+        .map_err(|error| error.to_string())?;
+    let evidence = partition_safety_discovery::discover_partition_safety_evidence()
+        .map_err(|error| error.to_string())?;
+    let now_unix_ms = evidence.captured_at_unix_ms;
+    clarity_core::PartitionSafetyAssessment::try_new(&preview, evidence, now_unix_ms)
+        .map_err(|error| error.to_string())
+}
+
 /// Starts the desktop runtime and registers the minimal command surface.
 ///
 /// # Panics
@@ -294,7 +313,8 @@ pub fn run() {
             get_default_space_scan_request,
             get_disk_health_snapshot,
             get_partition_topology,
-            preview_partition_merge
+            preview_partition_merge,
+            assess_partition_merge_safety
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Clarity Disk");

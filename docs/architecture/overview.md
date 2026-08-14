@@ -36,6 +36,8 @@
 
 `clarity-core::partition` 保存平台无关的拓扑身份、保护分区分类、失败关闭检查和模拟布局。Tauri 的 `get_partition_topology` 不接受参数，`preview_partition_merge` 只接受源/目标分区 ID，并在每次预演前重新发现；Vue 不提交盘符、路径、GUID、偏移、命令文本或执行选项。浏览器模式使用独立 Fixture，因此前端开发不会访问真实磁盘。
 
+`clarity-core::partition_safety` 保存计划七不可变计划、前置条件、摘要和版本化恢复状态机。`partition_safety_discovery.rs` 通过固定只读脚本读取系统电池与 Windows 待重启标记；它不接受调用方参数。`assess_partition_merge_safety` 重新发现拓扑、重新运行计划六预演，再绑定系统证据生成五分钟有效计划。当前没有独立备份提供程序、计划持久化、执行令牌、特权服务或写盘适配器，因此返回值固定为未授权且无写入能力。
+
 ### 特权服务
 
 未来以独立管理员进程运行，只接受有限的版本化协议。服务必须重新验证路径、卷标识、操作前置条件和用户确认令牌。

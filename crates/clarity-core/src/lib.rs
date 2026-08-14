@@ -4,6 +4,7 @@ mod cleanup;
 mod dashboard;
 mod health;
 mod partition;
+mod partition_safety;
 mod space_scan;
 
 pub use cleanup::{
@@ -33,6 +34,13 @@ pub use partition::{
     MergeCheckCode, MergePreview, MergePreviewRequest, MergeRiskLevel, PartitionDescriptor,
     PartitionKind, PartitionOperationalState, PartitionPreviewError, PartitionTopology,
     PhysicalDisk, SimulatedPartition, SimulatedPartitionLayout, SnapshotState, TopologyHealth,
+};
+pub use partition_safety::{
+    BackupEvidenceState, ExternalPowerState, ImmutablePartitionPlan, PartitionOperationKind,
+    PartitionRecoveryEvent, PartitionRecoveryJournal, PartitionRecoveryState,
+    PartitionSafetyAssessment, PartitionSafetyBlocker, PartitionSafetyBlockerCode,
+    PartitionSafetyCheck, PartitionSafetyCheckCode, PartitionSafetyError, PartitionSafetyEvidence,
+    PartitionSafetyStatus, PendingRestartState,
 };
 pub use space_scan::{
     SpaceScanEntry, SpaceScanError, SpaceScanHistoryEntry, SpaceScanProgress, SpaceScanRequest,

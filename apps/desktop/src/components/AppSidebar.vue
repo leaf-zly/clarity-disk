@@ -9,6 +9,7 @@ import {
   PieChart,
   RotateCcw,
   Settings2,
+  ShieldCheck,
   Sparkles,
 } from "@lucide/vue";
 
@@ -44,6 +45,7 @@ const primaryItems: readonly NavigationItem[] = [
 
 const diskItems: readonly NavigationItem[] = [
   { id: "partitions", label: "分区管理", icon: PanelsTopLeft },
+  { id: "partition-safety", label: "安全基础", icon: ShieldCheck },
   { id: "health", label: "磁盘健康", icon: Activity },
 ];
 

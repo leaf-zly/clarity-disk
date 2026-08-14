@@ -176,7 +176,11 @@ fn stage_item(
     }
     let bytes = item_size(original_path, &metadata);
     let current = store.get();
-    let policy = current.as_ref().map_or_default(|index| index.policy);
+    let policy = current
+        .as_ref()
+        .map_or_else(clarity_core::QuarantinePolicy::default, |index| {
+            index.policy
+        });
     let used = current.as_ref().map_or(0, |index| index.total_bytes);
     if used.saturating_add(bytes) > policy.max_bytes {
         return Err(CleanupExecutorError::CapacityExceeded);

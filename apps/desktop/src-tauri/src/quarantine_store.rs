@@ -83,7 +83,6 @@ impl QuarantineStore {
             entries: Vec::new(),
             files_moved: false,
             total_bytes: 0,
-            policy: clarity_core::QuarantinePolicy::default(),
             policy: QuarantinePolicy::default(),
         });
         plan_id.clone_into(&mut index.plan_id);
@@ -285,6 +284,7 @@ mod tests {
             entries: vec![],
             files_moved: false,
             total_bytes: 0,
+            policy: QuarantinePolicy::default(),
         };
         store.save(index.clone()).expect("index should persist");
         assert_eq!(QuarantineStore::with_path(path.clone()).get(), Some(index));

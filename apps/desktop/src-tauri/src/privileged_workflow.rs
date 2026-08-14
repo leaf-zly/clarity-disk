@@ -157,10 +157,10 @@ impl PrivilegedWorkflow {
         }
         let plan = assessment.plan.clone();
         let token = random_hex(32)?;
-        let operation = PrivilegedOperation::PartitionMerge(PartitionMergeOperation {
+        let operation = PrivilegedOperation::PartitionMerge(Box::new(PartitionMergeOperation {
             plan,
             authorization_token_digest: hex_sha256(token.as_bytes()),
-        });
+        }));
         let challenge = self.issue_challenge_with_token(
             operation,
             token,

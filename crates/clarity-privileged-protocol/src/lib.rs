@@ -107,7 +107,7 @@ pub enum PrivilegedOperation {
     /// Run one fixed Windows system-maintenance adapter.
     Maintenance(MaintenanceOperation),
     /// Run the experimental, digest-bound adjacent data-partition merge.
-    PartitionMerge(PartitionMergeOperation),
+    PartitionMerge(Box<PartitionMergeOperation>),
 }
 
 impl PrivilegedOperation {
@@ -360,10 +360,10 @@ mod tests {
             expires_at_unix_ms: now + 60_000,
             client_version: "0.1.0".to_owned(),
             confirmation_phrase: PARTITION_MERGE_CONFIRMATION.to_owned(),
-            operation: PrivilegedOperation::PartitionMerge(PartitionMergeOperation {
+            operation: PrivilegedOperation::PartitionMerge(Box::new(PartitionMergeOperation {
                 plan: plan(now),
                 authorization_token_digest: "b".repeat(64),
-            }),
+            })),
         }
     }
 

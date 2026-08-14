@@ -9,6 +9,8 @@ use thiserror::Error;
 
 use crate::dashboard::SuggestionRisk;
 
+const QUARANTINE_GIB: u64 = 1024 * 1024 * 1024;
+
 /// Lifecycle state for a read-only cleanup scan.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -297,8 +299,14 @@ impl QuarantinePolicy {
         if ![7, 15, 30].contains(&self.retention_days) {
             return Err(QuarantinePolicyError::UnsupportedRetention);
         }
-        const GIB: u64 = 1024 * 1024 * 1024;
-        if ![GIB, 5 * GIB, 10 * GIB, 20 * GIB].contains(&self.max_bytes) {
+        if ![
+            QUARANTINE_GIB,
+            5 * QUARANTINE_GIB,
+            10 * QUARANTINE_GIB,
+            20 * QUARANTINE_GIB,
+        ]
+        .contains(&self.max_bytes)
+        {
             return Err(QuarantinePolicyError::UnsupportedCapacity);
         }
         Ok(self)

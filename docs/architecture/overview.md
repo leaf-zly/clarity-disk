@@ -30,7 +30,9 @@
 
 封装 Windows Storage API、卷管理、SMART、VSS、BitLocker 和文件系统能力。平台错误必须转换成稳定的领域错误。
 
-当前第一阶段仅通过安全 Rust 封装读取系统盘挂载点、总容量和可用容量。该模块不申请管理员权限，不遍历用户文件，也不具备删除或修改分区的接口。详细分类扫描、健康检测与清理规则将作为独立能力逐步接入。
+当前平台层包括逻辑卷发现、受限清理适配器和计划六的物理分区发现。分区适配器只从受信任的 `%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe` 运行编译期固定的 Storage/CIM 查询，不插入调用方参数；它读取 `Get-Disk`、`Get-Partition`、`Get-Volume`、BitLocker、卷影副本、动态磁盘和介质可靠性状态，并把未知状态保守映射为阻塞。该模块不申请管理员权限，也没有 `diskpart`、格式化、缩放、删除、迁移或重启接口。
+
+`clarity-core::partition` 保存平台无关的拓扑身份、保护分区分类、失败关闭检查和模拟布局。Tauri 的 `get_partition_topology` 不接受参数，`preview_partition_merge` 只接受源/目标分区 ID，并在每次预演前重新发现；Vue 不提交盘符、路径、GUID、偏移、命令文本或执行选项。浏览器模式使用独立 Fixture，因此前端开发不会访问真实磁盘。
 
 ### 特权服务
 

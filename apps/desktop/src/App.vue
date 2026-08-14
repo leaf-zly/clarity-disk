@@ -3,6 +3,7 @@ import { ref } from "vue";
 
 import AppSidebar from "@/components/AppSidebar.vue";
 import DashboardPage from "@/pages/DashboardPage.vue";
+import PartitionPreviewPage from "@/pages/PartitionPreviewPage.vue";
 
 const activeSection = ref("overview");
 </script>
@@ -11,7 +12,8 @@ const activeSection = ref("overview");
   <div class="app-shell">
     <AppSidebar v-model:active-section="activeSection" />
     <main class="app-content">
-      <DashboardPage />
+      <PartitionPreviewPage v-if="activeSection === 'partitions'" />
+      <DashboardPage v-else />
     </main>
   </div>
 </template>

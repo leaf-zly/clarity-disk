@@ -68,6 +68,7 @@ const secondaryItems: readonly NavigationItem[] = [
         class="nav-item"
         :class="{ active: activeSection === item.id }"
         type="button"
+        :aria-label="item.label"
         :aria-current="activeSection === item.id ? 'page' : undefined"
         @click="emit('update:activeSection', item.id)"
       >
@@ -82,6 +83,7 @@ const secondaryItems: readonly NavigationItem[] = [
         class="nav-item"
         :class="{ active: activeSection === item.id }"
         type="button"
+        :aria-label="item.label"
         :aria-current="activeSection === item.id ? 'page' : undefined"
         @click="emit('update:activeSection', item.id)"
       >
@@ -97,6 +99,7 @@ const secondaryItems: readonly NavigationItem[] = [
         class="nav-item"
         :class="{ active: activeSection === item.id }"
         type="button"
+        :aria-label="item.label"
         :aria-current="activeSection === item.id ? 'page' : undefined"
         @click="emit('update:activeSection', item.id)"
       >

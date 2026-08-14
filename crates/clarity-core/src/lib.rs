@@ -2,6 +2,7 @@
 
 mod cleanup;
 mod dashboard;
+mod partition;
 mod space_scan;
 
 pub use cleanup::{
@@ -19,6 +20,12 @@ pub use cleanup::{
 pub use dashboard::{
     CleanupSummary, DashboardError, DashboardSnapshot, DiskCategory, DiskCategoryKind, DiskHealth,
     DiskMetadata, DiskSummary, Suggestion, SuggestionRisk, VolumeHealthStatus,
+};
+pub use partition::{
+    DiskLayoutKind, EncryptionState, MediaErrorState, MergeBlocker, MergeBlockerCode, MergeCheck,
+    MergeCheckCode, MergePreview, MergePreviewRequest, MergeRiskLevel, PartitionDescriptor,
+    PartitionKind, PartitionOperationalState, PartitionPreviewError, PartitionTopology,
+    PhysicalDisk, SimulatedPartition, SimulatedPartitionLayout, SnapshotState, TopologyHealth,
 };
 pub use space_scan::{
     SpaceScanEntry, SpaceScanError, SpaceScanHistoryEntry, SpaceScanProgress, SpaceScanRequest,

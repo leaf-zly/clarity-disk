@@ -9,6 +9,7 @@ mod cleanup_executor;
 mod cleanup_scan;
 mod cleanup_workflow;
 mod disk_discovery;
+mod partition_discovery;
 mod quarantine_store;
 mod space_scan;
 mod state_store;
@@ -238,6 +239,25 @@ fn get_default_space_scan_request(
     space_scan::default_request(root_path).map_err(|error| error.to_string())
 }
 
+/// Returns a fresh read-only physical disk and partition topology.
+#[tauri::command]
+fn get_partition_topology() -> Result<clarity_core::PartitionTopology, String> {
+    partition_discovery::discover_partition_topology().map_err(|error| error.to_string())
+}
+
+/// Re-discovers disk state and evaluates a non-authorizing merge preview.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn preview_partition_merge(
+    request: clarity_core::MergePreviewRequest,
+) -> Result<clarity_core::MergePreview, String> {
+    let topology =
+        partition_discovery::discover_partition_topology().map_err(|error| error.to_string())?;
+    topology
+        .preview_merge(&request)
+        .map_err(|error| error.to_string())
+}
+
 /// Starts the desktop runtime and registers the minimal command surface.
 ///
 /// # Panics
@@ -264,7 +284,9 @@ pub fn run() {
             pause_space_scan,
             resume_space_scan,
             get_space_scan_history,
-            get_default_space_scan_request
+            get_default_space_scan_request,
+            get_partition_topology,
+            preview_partition_merge
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Clarity Disk");

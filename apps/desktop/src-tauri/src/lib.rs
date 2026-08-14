@@ -4,6 +4,7 @@ use clarity_core::{CleanupSummary, DashboardSnapshot, DiskHealth, Suggestion, Su
 use std::sync::OnceLock;
 
 mod audit_store;
+mod cleanup_executor;
 mod cleanup_scan;
 mod cleanup_workflow;
 mod disk_discovery;
@@ -118,6 +119,39 @@ fn get_audit_events() -> Vec<clarity_core::AuditEvent> {
         .audit_events()
 }
 
+/// Issues a short-lived one-time confirmation after a fresh read-only validation.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn prepare_cleanup_execution(
+    request: clarity_core::PrepareCleanupExecutionRequest,
+) -> Result<clarity_core::CleanupExecutionChallenge, String> {
+    CLEANUP_WORKFLOW
+        .get_or_init(cleanup_workflow::CleanupWorkflow::default)
+        .prepare_execution(&request)
+}
+
+/// Consumes a one-time confirmation and runs the restricted quarantine executor.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn execute_cleanup(
+    request: clarity_core::ExecuteCleanupRequest,
+) -> Result<clarity_core::CleanupExecutionReport, String> {
+    CLEANUP_WORKFLOW
+        .get_or_init(cleanup_workflow::CleanupWorkflow::default)
+        .execute(&request)
+}
+
+/// Restores one backend-indexed item without overwriting an existing path.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn restore_quarantine_entry(
+    request: clarity_core::RestoreQuarantineRequest,
+) -> Result<clarity_core::QuarantineRestoreResult, String> {
+    CLEANUP_WORKFLOW
+        .get_or_init(cleanup_workflow::CleanupWorkflow::default)
+        .restore(&request)
+}
+
 /// Starts a bounded, read-only directory scan.
 #[tauri::command]
 fn start_space_scan(
@@ -196,6 +230,9 @@ pub fn run() {
             prepare_quarantine_index,
             get_quarantine_index,
             get_audit_events,
+            prepare_cleanup_execution,
+            execute_cleanup,
+            restore_quarantine_entry,
             start_space_scan,
             get_space_scan,
             cancel_space_scan,

@@ -12,6 +12,7 @@ repository = "https://github.com/leaf-zly/clarity-disk"
 
 [workspace.dependencies]
 clarity-core = { path = "crates/clarity-core" }
+getrandom = "0.3.4"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 sha2 = "0.10.9"

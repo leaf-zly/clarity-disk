@@ -14,13 +14,13 @@ import {
 } from "@lucide/vue";
 
 import type {
-  AuditEvent,
   CleanupPlan,
   CleanupPreview,
   QuarantineIndex,
   RecoveryStrategy,
   SuggestionRisk,
 } from "@/types/dashboard";
+import type { CleanupAuditEvent } from "@/types/cleanup-audit";
 import { formatBytes } from "@/utils/format-bytes";
 
 /** Complete read-only cleanup workflow state rendered by the panel. */
@@ -31,7 +31,7 @@ interface Props {
   highestRisk: SuggestionRisk | undefined;
   plan: DeepReadonly<CleanupPlan> | undefined;
   quarantine: DeepReadonly<QuarantineIndex> | undefined;
-  auditEvents: DeepReadonly<AuditEvent[]>;
+  auditEvents: DeepReadonly<CleanupAuditEvent[]>;
   error: string | undefined;
   isLoading: boolean;
   isPreparingPlan: boolean;
@@ -76,16 +76,22 @@ function riskLabel(risk: SuggestionRisk): string {
 
 function recoveryLabel(strategy: RecoveryStrategy): string {
   if (strategy === "regenerate") return "应用或 Windows 可重新生成";
-  if (strategy === "quarantine") return "未来可先进入隔离区";
+  if (strategy === "quarantine") return "可进入隔离区并按项恢复";
   if (strategy === "windowsManaged") return "遵循 Windows 官方维护流程";
   return "不保证自动恢复";
 }
 
-function auditLabel(kind: AuditEvent["kind"]): string {
+function auditLabel(kind: CleanupAuditEvent["kind"]): string {
   if (kind === "scanCompleted") return "扫描完成";
   if (kind === "planCreated") return "计划生成";
   if (kind === "planRejected") return "计划拒绝";
-  return "隔离区索引";
+  if (kind === "quarantineIndexCreated") return "隔离区索引";
+  if (kind === "executionConfirmationIssued") return "确认已签发";
+  if (kind === "executionStarted") return "隔离开始";
+  if (kind === "executionCompleted") return "隔离完成";
+  if (kind === "quarantineRestoreStarted") return "恢复开始";
+  if (kind === "quarantineRestoreCompleted") return "恢复结果";
+  return "未知事件";
 }
 </script>
 

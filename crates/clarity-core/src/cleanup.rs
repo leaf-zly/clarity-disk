@@ -190,6 +190,16 @@ pub enum AuditEventKind {
     PlanRejected,
     /// A quarantine index preview was created without moving files.
     QuarantineIndexCreated,
+    /// A one-time execution confirmation was issued after fresh validation.
+    ExecutionConfirmationIssued,
+    /// A confirmed execution wrote its durable start audit before filesystem work.
+    ExecutionStarted,
+    /// A confirmed, restricted cleanup execution completed.
+    ExecutionCompleted,
+    /// A backend-indexed restore wrote its durable start audit before filesystem work.
+    QuarantineRestoreStarted,
+    /// A quarantined item was restored or safely rejected because of a conflict.
+    QuarantineRestoreCompleted,
 }
 
 /// Minimal, privacy-preserving audit record for cleanup safety decisions.
@@ -214,51 +224,187 @@ pub struct AuditEvent {
     pub rule_ids: Vec<String>,
 }
 
-/// State of an entry in the read-only quarantine index.
+/// Lifecycle state of a preview or real quarantine recovery entry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum QuarantineEntryStatus {
     /// Metadata is indexed for review; no filesystem move occurred.
     PreviewOnly,
+    /// A durable recovery record exists and movement may be in progress.
+    Staging,
+    /// The item was moved into the application-owned quarantine directory.
+    Staged,
+    /// The item was restored to its original location.
+    Restored,
+    /// Restore was refused because the original location is occupied.
+    RestoreConflict,
 }
 
-/// Candidate metadata retained for a possible future quarantine operation.
+/// Locally persisted metadata for preview, staging, and restoration.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QuarantineEntry {
+    /// Stable entry identifier used by restore commands instead of a path.
+    #[serde(default)]
+    pub entry_id: String,
     /// Candidate identity copied from a validated cleanup plan.
     pub candidate_id: String,
     /// Versioned cleanup rule responsible for the candidate.
     pub rule_id: String,
-    /// Original allow-listed path, used only for local preview and future revalidation.
+    /// Original allow-listed path retained locally for restore revalidation.
     pub original_path: String,
+    /// Application-owned quarantine path after staging, if movement occurred.
+    #[serde(default)]
+    pub quarantine_path: Option<String>,
     /// Expected bytes from the immutable plan snapshot.
     pub bytes: u64,
-    /// Metadata digest that a future executor must revalidate.
+    /// Metadata digest copied from the freshly validated candidate snapshot.
     pub metadata_digest: String,
-    /// Current preview-only state.
+    /// Current preview, staging, quarantine, restore, or conflict state.
     pub status: QuarantineEntryStatus,
+    /// Time when the item entered quarantine, in Unix milliseconds.
+    #[serde(default)]
+    pub moved_at_unix_ms: Option<u64>,
+    /// Time when restoration completed, in Unix milliseconds.
+    #[serde(default)]
+    pub restored_at_unix_ms: Option<u64>,
 }
 
-/// Persisted read-only quarantine index derived from a validated plan.
+/// Persisted quarantine index containing previews and durable recovery records.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QuarantineIndex {
     /// Unique index identifier.
     pub index_id: String,
-    /// Plan from which all entries were copied.
+    /// Most recent plan that created or updated this index.
     pub plan_id: String,
     /// Creation time in Unix milliseconds.
     pub created_at_unix_ms: u64,
-    /// Eligible entries included in the preview.
+    /// Preview entries and preserved execution recovery records.
     pub entries: Vec<QuarantineEntry>,
-    /// Always false in plan two; no file move API exists.
+    /// Whether at least one entry still represents moved or transitional data.
     pub files_moved: bool,
     /// Aggregate bytes represented by indexed entries.
     pub total_bytes: u64,
 }
 
+/// Request to issue a one-time confirmation for executable plan candidates.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrepareCleanupExecutionRequest {
+    /// Current immutable cleanup plan identifier.
+    pub plan_id: String,
+    /// Candidate identities copied from that plan; paths are never accepted.
+    pub candidate_ids: Vec<String>,
+}
+
+/// Short-lived one-time challenge shown before a restricted cleanup execution.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CleanupExecutionChallenge {
+    /// Unique authorization identity retained by the backend.
+    pub authorization_id: String,
+    /// Plan bound to this challenge.
+    pub plan_id: String,
+    /// Digest bound to this challenge.
+    pub plan_digest: String,
+    /// Candidate IDs approved after fresh read-only validation.
+    pub candidate_ids: Vec<String>,
+    /// Opaque one-time token; it never grants arbitrary filesystem access.
+    pub confirmation_token: String,
+    /// Exact localized phrase required from the explicit confirmation UI.
+    pub confirmation_phrase: String,
+    /// Expiry time in Unix milliseconds.
+    pub expires_at_unix_ms: u64,
+}
+
+/// Explicit confirmation submitted to consume a one-time challenge.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecuteCleanupRequest {
+    /// Backend-issued authorization identity.
+    pub authorization_id: String,
+    /// Backend-issued opaque token.
+    pub confirmation_token: String,
+    /// Exact phrase displayed with the challenge.
+    pub confirmation_phrase: String,
+}
+
+/// Terminal outcome of one restricted candidate execution.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CleanupExecutionItemStatus {
+    /// Every movable direct child was staged successfully.
+    Staged,
+    /// Some children were staged and unsafe or locked children were skipped.
+    PartiallyStaged,
+    /// No child could be staged safely.
+    Skipped,
+    /// The candidate changed after confirmation and was rejected.
+    RevalidationFailed,
+}
+
+/// Per-candidate result produced by the restricted executor.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CleanupExecutionItemResult {
+    /// Candidate identity from the immutable plan.
+    pub candidate_id: String,
+    /// Terminal candidate outcome.
+    pub status: CleanupExecutionItemStatus,
+    /// Bytes successfully staged in quarantine.
+    pub staged_bytes: u64,
+    /// Direct child entries successfully staged.
+    pub staged_items: u64,
+    /// Entries skipped due to locks, unsafe indirection, or concurrent changes.
+    pub skipped_items: u64,
+    /// Safe user-facing result reason without file content.
+    pub reason: String,
+}
+
+/// Completed report for one explicitly confirmed cleanup execution.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CleanupExecutionReport {
+    /// Unique execution identifier.
+    pub execution_id: String,
+    /// Immutable plan that was revalidated.
+    pub plan_id: String,
+    /// Candidate-level terminal outcomes.
+    pub results: Vec<CleanupExecutionItemResult>,
+    /// Total bytes successfully staged.
+    pub staged_bytes: u64,
+    /// Execution start time in Unix milliseconds.
+    pub started_at_unix_ms: u64,
+    /// Execution finish time in Unix milliseconds.
+    pub finished_at_unix_ms: u64,
+    /// True only for this consumed, restricted operation report.
+    pub execution_authorized: bool,
+}
+
+/// Request to restore one stored quarantine entry by identity.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreQuarantineRequest {
+    /// Entry identity loaded from the backend-owned quarantine index.
+    pub entry_id: String,
+}
+
+/// Result of a conflict-safe quarantine restoration attempt.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuarantineRestoreResult {
+    /// Entry identity that was evaluated.
+    pub entry_id: String,
+    /// Final persisted entry status.
+    pub status: QuarantineEntryStatus,
+    /// Safe user-facing explanation.
+    pub reason: String,
+}
+
 const PLAN_TTL_MS: u64 = 10 * 60 * 1000;
+/// Exact phrase required by the first restricted execution workflow.
+pub const CLEANUP_CONFIRMATION_PHRASE: &str = "确认移入隔离区";
 
 impl CleanupPlan {
     /// Builds a deterministic, non-authorizing plan from default-selected items.
@@ -383,6 +529,74 @@ impl CleanupPlan {
         }
         Ok(())
     }
+
+    /// Revalidates selected candidates against a newly generated scan snapshot.
+    ///
+    /// Unlike [`Self::validate_against`], the new scan has a different scan ID
+    /// and observation time. All execution-relevant fields must still match.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the plan expired, the source volume changed, a
+    /// selected candidate disappeared, or its rule/path/metadata changed.
+    pub fn validate_fresh_snapshot(
+        &self,
+        fresh: &CleanupPreview,
+        candidate_ids: &[String],
+    ) -> Result<Vec<CleanupCandidate>, CleanupPlanError> {
+        self.validate_fresh_snapshot_at(fresh, candidate_ids, current_unix_ms())
+    }
+
+    /// Revalidates a fresh snapshot using a supplied clock for tests.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::validate_fresh_snapshot`].
+    pub fn validate_fresh_snapshot_at(
+        &self,
+        fresh: &CleanupPreview,
+        candidate_ids: &[String],
+        now_unix_ms: u64,
+    ) -> Result<Vec<CleanupCandidate>, CleanupPlanError> {
+        if fresh.scan.status != ScanStatus::Completed {
+            return Err(CleanupPlanError::PreviewNotCompleted {
+                status: fresh.scan.status,
+            });
+        }
+        if now_unix_ms > self.expires_at_unix_ms {
+            return Err(CleanupPlanError::PlanExpired);
+        }
+        if self.source_volume_id != fresh.scan.source_volume_id {
+            return Err(CleanupPlanError::VolumeChanged);
+        }
+        if candidate_ids.is_empty() {
+            return Err(CleanupPlanError::NoSelectedCandidates);
+        }
+        let requested: HashSet<_> = candidate_ids.iter().collect();
+        if requested.len() != candidate_ids.len() {
+            return Err(CleanupPlanError::DuplicateCandidate);
+        }
+        candidate_ids
+            .iter()
+            .map(|id| {
+                let planned = self
+                    .candidates
+                    .iter()
+                    .find(|candidate| candidate.id == *id)
+                    .ok_or_else(|| CleanupPlanError::UnknownCandidate(id.clone()))?;
+                let current = fresh
+                    .candidates
+                    .iter()
+                    .find(|candidate| candidate.id == *id)
+                    .ok_or(CleanupPlanError::CandidateChanged)?;
+                if same_execution_snapshot(planned, current) {
+                    Ok(current.clone())
+                } else {
+                    Err(CleanupPlanError::CandidateChanged)
+                }
+            })
+            .collect()
+    }
 }
 
 impl QuarantineIndex {
@@ -398,12 +612,16 @@ impl QuarantineIndex {
             .iter()
             .filter(|candidate| candidate.quarantine_eligible)
             .map(|candidate| QuarantineEntry {
+                entry_id: format!("preview-{}", candidate.id),
                 candidate_id: candidate.id.clone(),
                 rule_id: candidate.rule_id.clone(),
                 original_path: candidate.path.clone(),
+                quarantine_path: None,
                 bytes: candidate.bytes,
                 metadata_digest: candidate.metadata_digest.clone(),
                 status: QuarantineEntryStatus::PreviewOnly,
+                moved_at_unix_ms: None,
+                restored_at_unix_ms: None,
             })
             .collect();
         if entries.is_empty() {
@@ -423,6 +641,21 @@ impl QuarantineIndex {
             total_bytes,
         })
     }
+}
+
+fn same_execution_snapshot(planned: &CleanupCandidate, current: &CleanupCandidate) -> bool {
+    planned.id == current.id
+        && planned.rule_id == current.rule_id
+        && planned.rule_version == current.rule_version
+        && planned.path == current.path
+        && planned.bytes == current.bytes
+        && planned.item_count == current.item_count
+        && planned.risk == current.risk
+        && planned.recoverable == current.recoverable
+        && planned.requires_admin == current.requires_admin
+        && planned.recovery_strategy == current.recovery_strategy
+        && planned.quarantine_eligible == current.quarantine_eligible
+        && planned.metadata_digest == current.metadata_digest
 }
 
 fn hash_plan(scan_id: &str, candidates: &[CleanupCandidate]) -> Result<String, CleanupPlanError> {
@@ -661,6 +894,28 @@ mod tests {
         assert_eq!(
             plan.validate_against_at(&preview, plan.expires_at_unix_ms + 1),
             Err(CleanupPlanError::PlanExpired)
+        );
+    }
+
+    #[test]
+    fn fresh_execution_validation_ignores_scan_identity_but_rejects_metadata_changes() {
+        let original = preview();
+        let plan = CleanupPlan::from_preview(&original).expect("plan should be valid");
+        let mut fresh = original.clone();
+        fresh.scan.scan_id = "scan-2".to_owned();
+        fresh.candidates[0].observed_at_unix_ms = Some(2);
+        fresh.candidates[1].observed_at_unix_ms = Some(2);
+        let ids = vec!["browser".to_owned()];
+
+        let validated = plan
+            .validate_fresh_snapshot_at(&fresh, &ids, plan.created_at_unix_ms + 1)
+            .expect("equivalent fresh metadata should validate");
+        assert_eq!(validated.len(), 1);
+
+        fresh.candidates[0].metadata_digest = "changed".to_owned();
+        assert_eq!(
+            plan.validate_fresh_snapshot_at(&fresh, &ids, plan.created_at_unix_ms + 1),
+            Err(CleanupPlanError::CandidateChanged)
         );
     }
 

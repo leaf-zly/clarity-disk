@@ -336,6 +336,7 @@ name = "clarity-disk"
 version = "0.1.0"
 dependencies = [
  "clarity-core",
+ "getrandom 0.3.4",
  "serde",
  "serde_json",
  "sha2",

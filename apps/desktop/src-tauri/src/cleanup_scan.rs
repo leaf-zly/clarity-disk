@@ -366,6 +366,10 @@ fn measure_tree(
         path: root.to_path_buf(),
         source,
     })?;
+    let mut entries: Vec<_> = entries.collect();
+    // Metadata digests must be stable across fresh validation scans; Windows
+    // directory enumeration order is not a contractual ordering.
+    entries.sort_by_key(|entry| entry.as_ref().ok().map(std::fs::DirEntry::path));
     for entry in entries {
         let Ok(entry) = entry else {
             *skipped_items = skipped_items.saturating_add(1);

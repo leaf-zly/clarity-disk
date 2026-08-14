@@ -5,9 +5,12 @@ mod dashboard;
 mod space_scan;
 
 pub use cleanup::{
-    AuditEvent, AuditEventKind, CleanupCandidate, CleanupError, CleanupPlan, CleanupPlanError,
-    CleanupPreview, CleanupRuleAvailability, CleanupRuleStatus, PrepareCleanupPlanRequest,
-    QuarantineEntry, QuarantineEntryStatus, QuarantineError, QuarantineIndex, RecoveryStrategy,
+    AuditEvent, AuditEventKind, CLEANUP_CONFIRMATION_PHRASE, CleanupCandidate, CleanupError,
+    CleanupExecutionChallenge, CleanupExecutionItemResult, CleanupExecutionItemStatus,
+    CleanupExecutionReport, CleanupPlan, CleanupPlanError, CleanupPreview, CleanupRuleAvailability,
+    CleanupRuleStatus, ExecuteCleanupRequest, PrepareCleanupExecutionRequest,
+    PrepareCleanupPlanRequest, QuarantineEntry, QuarantineEntryStatus, QuarantineError,
+    QuarantineIndex, QuarantineRestoreResult, RecoveryStrategy, RestoreQuarantineRequest,
     ScanProgress, ScanStatus,
 };
 pub use dashboard::{

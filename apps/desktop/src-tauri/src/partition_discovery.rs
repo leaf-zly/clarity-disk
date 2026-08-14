@@ -1,6 +1,6 @@
 //! Windows read-only partition topology discovery.
 //!
-//! The adapter executes one compile-time PowerShell/CIM query because the
+//! The adapter executes one compile-time `PowerShell`/CIM query because the
 //! Windows Storage Management API is PowerShell's supported compatibility
 //! surface across the Windows versions targeted by this desktop application.
 //! No caller input, path, command text, or partition operation is interpolated.
@@ -185,7 +185,7 @@ $disks = @(
 ///
 /// # Errors
 ///
-/// Returns an error when PowerShell cannot be located, the storage provider
+/// Returns an error when `PowerShell` cannot be located, the storage provider
 /// fails, JSON is malformed, no disks are returned, or platform values violate
 /// capacity invariants.
 pub fn discover_partition_topology() -> Result<PartitionTopology, PartitionDiscoveryError> {
@@ -519,7 +519,7 @@ pub enum PartitionDiscoveryError {
     /// Windows system root was unavailable, so no trusted executable path exists.
     #[error("Windows SystemRoot is unavailable")]
     SystemRootUnavailable,
-    /// The trusted in-box PowerShell executable was not present.
+    /// The trusted in-box `PowerShell` executable was not present.
     #[error("Windows PowerShell is unavailable at {0}")]
     PowerShellUnavailable(PathBuf),
     /// The fixed storage query could not be launched.

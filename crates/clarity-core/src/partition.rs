@@ -159,7 +159,7 @@ pub struct PhysicalDisk {
     pub number: u32,
     /// Vendor- or operating-system-provided friendly name.
     pub friendly_name: String,
-    /// Bus technology such as NVMe, SATA, USB, or Spaces.
+    /// Bus technology such as `NVMe`, `SATA`, `USB`, or Storage Spaces.
     pub bus_type: String,
     /// Partition table style such as GPT or MBR.
     pub partition_style: String,
@@ -209,7 +209,7 @@ pub struct PartitionDescriptor {
     pub is_read_only: bool,
     /// Current online/offline state.
     pub operational_state: PartitionOperationalState,
-    /// BitLocker state; unknown is intentionally blocking.
+    /// `BitLocker` state; unknown is intentionally blocking.
     pub encryption_state: EncryptionState,
     /// Volume Shadow Copy presence; unknown is intentionally blocking.
     pub snapshot_state: SnapshotState,
@@ -263,15 +263,15 @@ pub enum PartitionKind {
     Unknown,
 }
 
-/// BitLocker signal used by conservative feasibility checks.
+/// `BitLocker` signal used by conservative feasibility checks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum EncryptionState {
-    /// BitLocker is confirmed disabled for the mounted data volume.
+    /// `BitLocker` is confirmed disabled for the mounted data volume.
     Off,
-    /// BitLocker protection is enabled.
+    /// `BitLocker` protection is enabled.
     On,
-    /// BitLocker protection is suspended but encrypted metadata still exists.
+    /// `BitLocker` protection is suspended but encrypted metadata still exists.
     Suspended,
     /// Encryption does not apply to a synthetic unallocated region.
     NotApplicable,
@@ -467,7 +467,7 @@ pub enum MergeBlockerCode {
     PartitionIdentityUnknown,
     /// File system is not confirmed NTFS.
     UnsupportedFileSystem,
-    /// BitLocker is enabled, suspended, or unknown.
+    /// `BitLocker` is enabled, suspended, or unknown.
     EncryptionNotConfirmedOff,
     /// Shadow copies are present or could not be checked.
     SnapshotStateUnsafe,

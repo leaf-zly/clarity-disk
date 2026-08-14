@@ -34,8 +34,8 @@ pub(crate) fn execute(
         if !runtime_gate_enabled() {
             return rejected(request_id, "实验性分区写入的管理员运行时开关未启用。");
         }
-        return execute_enabled(operation, request_id, now_unix_ms)
-            .unwrap_or_else(|failure| failure.into_report(request_id));
+        execute_enabled(operation, request_id, now_unix_ms)
+            .unwrap_or_else(|failure| failure.into_report(request_id))
     }
     #[cfg(not(all(windows, feature = "partition-writes")))]
     {
@@ -65,14 +65,14 @@ fn execute_enabled(
     let plan = &operation.plan;
     let mut journal = PartitionRecoveryJournal::try_new(plan, now_unix_ms)
         .map_err(|error| PartitionFailure::before_write(error.to_string()))?;
-    persist_journal(&journal).map_err(|error| PartitionFailure::before_write(error.to_string()))?;
+    persist_journal(&journal).map_err(PartitionFailure::before_write)?;
 
     let snapshot = rediscover(plan).map_err(PartitionFailure::before_write)?;
     validate_snapshot(plan, &snapshot).map_err(PartitionFailure::before_write)?;
     journal
         .apply(PartitionRecoveryEvent::PreflightPassed, crate::unix_ms())
         .map_err(|error| PartitionFailure::before_write(error.to_string()))?;
-    persist_journal(&journal).map_err(|error| PartitionFailure::before_write(error.to_string()))?;
+    persist_journal(&journal).map_err(PartitionFailure::before_write)?;
 
     let destination = migration_destination(plan, &snapshot)?;
     if destination.exists() {
@@ -94,14 +94,14 @@ fn execute_enabled(
     journal
         .apply(PartitionRecoveryEvent::MigrationPrepared, crate::unix_ms())
         .map_err(|error| PartitionFailure::before_write(error.to_string()))?;
-    persist_journal(&journal).map_err(|error| PartitionFailure::before_write(error.to_string()))?;
+    persist_journal(&journal).map_err(PartitionFailure::before_write)?;
 
     // This durable checkpoint is the irreversible boundary. Any later error
     // is reported as manual recovery required and is never retried blindly.
     journal
         .apply(PartitionRecoveryEvent::MutationStarted, crate::unix_ms())
         .map_err(|error| PartitionFailure::before_write(error.to_string()))?;
-    persist_journal(&journal).map_err(|error| PartitionFailure::before_write(error.to_string()))?;
+    persist_journal(&journal).map_err(PartitionFailure::before_write)?;
     if let Err(error) = mutate_partition_layout(plan) {
         let _ = journal.apply(PartitionRecoveryEvent::Interrupted, crate::unix_ms());
         let _ = persist_journal(&journal);
@@ -110,7 +110,7 @@ fn execute_enabled(
     journal
         .apply(PartitionRecoveryEvent::MutationCommitted, crate::unix_ms())
         .map_err(|error| PartitionFailure::after_write(error.to_string()))?;
-    persist_journal(&journal).map_err(|error| PartitionFailure::after_write(error.to_string()))?;
+    persist_journal(&journal).map_err(PartitionFailure::after_write)?;
 
     let verified = verify_postconditions(plan, &destination, &destination_digest).unwrap_or(false);
     let event = if verified {
@@ -121,7 +121,7 @@ fn execute_enabled(
     journal
         .apply(event, crate::unix_ms())
         .map_err(|error| PartitionFailure::after_write(error.to_string()))?;
-    persist_journal(&journal).map_err(|error| PartitionFailure::after_write(error.to_string()))?;
+    persist_journal(&journal).map_err(PartitionFailure::after_write)?;
     if !verified {
         return Err(PartitionFailure::after_write(
             "分区布局已修改，但后置校验未全部通过。请停止写入并按恢复日志人工检查。".to_owned(),
@@ -182,6 +182,9 @@ impl PartitionFailure {
 }
 
 #[cfg(all(windows, feature = "partition-writes"))]
+// This fixed provider DTO keeps each independently revalidated Windows signal
+// explicit so no aggregate boolean can hide which safety property changed.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RediscoveredSnapshot {
@@ -206,7 +209,6 @@ struct RediscoveredPartition {
     used_bytes: u64,
     free_bytes: u64,
     file_system: String,
-    drive_letter: String,
     health: String,
     is_system: bool,
     is_boot: bool,

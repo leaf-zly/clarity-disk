@@ -23,7 +23,7 @@ const RECOVERY_GPT_TYPE: &str = "{de94bba4-06d1-4d40-a16a-bfd50179d6ac}";
 
 // This script is an immutable application resource. Keeping it input-free is
 // the security boundary that prevents this adapter becoming an arbitrary shell.
-const DISCOVERY_SCRIPT: &str = r#"
+const DISCOVERY_SCRIPT: &str = r"
 $ErrorActionPreference = 'Stop'
 $utf8 = [System.Text.UTF8Encoding]::new($false)
 [Console]::OutputEncoding = $utf8
@@ -176,7 +176,7 @@ $disks = @(
 )
 
 [ordered]@{ disks = $disks; warnings = @($warnings) } | ConvertTo-Json -Depth 8 -Compress
-"#;
+";
 
 /// Discovers a read-only physical-disk and partition topology on Windows.
 ///
@@ -486,6 +486,9 @@ struct PowerShellDisk {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+// The DTO mirrors independent provider flags. Domain conversion immediately
+// replaces them with typed state and protection enums.
+#[allow(clippy::struct_excessive_bools)]
 struct PowerShellPartition {
     id: String,
     disk_id: String,
@@ -514,6 +517,7 @@ struct PowerShellPartition {
 #[derive(Debug, thiserror::Error)]
 pub enum PartitionDiscoveryError {
     /// Partition topology is available only on Windows.
+    #[cfg(not(windows))]
     #[error("partition topology discovery is supported only on Windows")]
     UnsupportedPlatform,
     /// Windows system root was unavailable, so no trusted executable path exists.

@@ -3,6 +3,7 @@ import { ref } from "vue";
 
 import AppSidebar from "@/components/AppSidebar.vue";
 import DashboardPage from "@/pages/DashboardPage.vue";
+import DiskHealthPage from "@/pages/DiskHealthPage.vue";
 import PartitionPreviewPage from "@/pages/PartitionPreviewPage.vue";
 
 const activeSection = ref("overview");
@@ -13,6 +14,7 @@ const activeSection = ref("overview");
     <AppSidebar v-model:active-section="activeSection" />
     <main class="app-content">
       <PartitionPreviewPage v-if="activeSection === 'partitions'" />
+      <DiskHealthPage v-else-if="activeSection === 'health'" />
       <DashboardPage v-else />
     </main>
   </div>

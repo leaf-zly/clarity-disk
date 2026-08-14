@@ -30,7 +30,9 @@
 
 封装 Windows Storage API、卷管理、SMART、VSS、BitLocker 和文件系统能力。平台错误必须转换成稳定的领域错误。
 
-当前平台层包括逻辑卷发现、受限清理适配器和计划六的物理分区发现。分区适配器只从受信任的 `%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe` 运行编译期固定的 Storage/CIM 查询，不插入调用方参数；它读取 `Get-Disk`、`Get-Partition`、`Get-Volume`、BitLocker、卷影副本、动态磁盘和介质可靠性状态，并把未知状态保守映射为阻塞。该模块不申请管理员权限，也没有 `diskpart`、格式化、缩放、删除、迁移或重启接口。
+当前平台层包括逻辑卷发现、受限清理适配器、计划六的物理分区发现和 F11 磁盘健康发现。分区适配器只从受信任的 `%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe` 运行编译期固定的 Storage/CIM 查询，不插入调用方参数；它读取 `Get-Disk`、`Get-Partition`、`Get-Volume`、BitLocker、卷影副本、动态磁盘和介质可靠性状态，并把未知状态保守映射为阻塞。该模块不申请管理员权限，也没有 `diskpart`、格式化、缩放、删除、迁移或重启接口。
+
+`disk_health_discovery.rs` 复用计划六的物理磁盘身份规则，优先按 `UniqueId` 关联 `Get-Disk` 与 `Get-PhysicalDisk`，再退化为磁盘号，无法关联则标记未知。适配器读取 Storage Reliability Counter、固件、介质、扇区和 BitLocker 汇总，完整序列号在脚本输出前被截断。`clarity-core::health` 统一验证范围、计算证据完整性并聚合状态；未知提供程序、自监测、身份或可靠性字段不会得到“良好”结论。Tauri 的 `get_disk_health_snapshot` 不接受参数，浏览器服务只使用静态 Fixture。
 
 `clarity-core::partition` 保存平台无关的拓扑身份、保护分区分类、失败关闭检查和模拟布局。Tauri 的 `get_partition_topology` 不接受参数，`preview_partition_merge` 只接受源/目标分区 ID，并在每次预演前重新发现；Vue 不提交盘符、路径、GUID、偏移、命令文本或执行选项。浏览器模式使用独立 Fixture，因此前端开发不会访问真实磁盘。
 

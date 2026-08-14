@@ -9,6 +9,7 @@ mod cleanup_executor;
 mod cleanup_scan;
 mod cleanup_workflow;
 mod disk_discovery;
+mod disk_health_discovery;
 mod partition_discovery;
 mod quarantine_store;
 mod space_scan;
@@ -245,6 +246,12 @@ fn get_partition_topology() -> Result<clarity_core::PartitionTopology, String> {
     partition_discovery::discover_partition_topology().map_err(|error| error.to_string())
 }
 
+/// Returns a fresh, privacy-preserving, read-only physical-disk health snapshot.
+#[tauri::command]
+fn get_disk_health_snapshot() -> Result<clarity_core::DiskHealthSnapshot, String> {
+    disk_health_discovery::discover_disk_health().map_err(|error| error.to_string())
+}
+
 /// Re-discovers disk state and evaluates a non-authorizing merge preview.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
@@ -285,6 +292,7 @@ pub fn run() {
             resume_space_scan,
             get_space_scan_history,
             get_default_space_scan_request,
+            get_disk_health_snapshot,
             get_partition_topology,
             preview_partition_merge
         ])

@@ -30,6 +30,18 @@ $utf8 = [System.Text.UTF8Encoding]::new($false)
 $OutputEncoding = $utf8
 $warnings = [System.Collections.Generic.List[string]]::new()
 
+function Get-SerialFingerprint([string]$serialNumber) {
+  if ([string]::IsNullOrWhiteSpace($serialNumber)) { return 'unknown' }
+  $sha256 = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($serialNumber.Trim())
+    $hash = $sha256.ComputeHash($bytes)
+    return ([System.BitConverter]::ToString($hash)).Replace('-', '').ToLowerInvariant().Substring(0, 16)
+  } finally {
+    $sha256.Dispose()
+  }
+}
+
 $snapshotState = 'none'
 try {
   $shadowCopies = @(Get-CimInstance -ClassName Win32_ShadowCopy -ErrorAction Stop)
@@ -61,7 +73,7 @@ $disks = @(
   Get-Disk -ErrorAction Stop | Sort-Object Number | ForEach-Object {
     $disk = $_
     $diskIdentity = if ([string]::IsNullOrWhiteSpace([string]$disk.UniqueId)) {
-      'disk-number:' + [string]$disk.Number + ':' + [string]$disk.SerialNumber
+      'disk-number:' + [string]$disk.Number + ':serial-sha256:' + (Get-SerialFingerprint ([string]$disk.SerialNumber))
     } else {
       'disk:' + ([string]$disk.UniqueId).Trim()
     }

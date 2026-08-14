@@ -182,9 +182,6 @@ impl PartitionFailure {
 }
 
 #[cfg(all(windows, feature = "partition-writes"))]
-// This fixed provider DTO keeps each independently revalidated Windows signal
-// explicit so no aggregate boolean can hide which safety property changed.
-#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RediscoveredSnapshot {
@@ -199,6 +196,9 @@ struct RediscoveredSnapshot {
 }
 
 #[cfg(all(windows, feature = "partition-writes"))]
+// This fixed provider DTO keeps each independently revalidated Windows signal
+// explicit so no aggregate boolean can hide which safety property changed.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RediscoveredPartition {

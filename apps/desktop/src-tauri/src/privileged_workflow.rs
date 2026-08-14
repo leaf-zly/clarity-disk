@@ -9,7 +9,7 @@ use std::process::{Command, Stdio};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use clarity_core::{ImmutablePartitionPlan, PartitionSafetyAssessment, PartitionSafetyStatus};
+use clarity_core::{PartitionSafetyAssessment, PartitionSafetyStatus};
 use clarity_privileged_protocol::{
     MaintenanceOperation, PROTOCOL_SCHEMA_VERSION, PartitionMergeOperation, PrivilegedCapabilities,
     PrivilegedExecutionReport, PrivilegedOperation, PrivilegedRequestEnvelope,
@@ -110,7 +110,7 @@ impl Default for PrivilegedWorkflow {
 
 impl PrivilegedWorkflow {
     /// Queries the adjacent broker executable without requesting elevation.
-    pub(crate) fn capabilities(&self) -> PrivilegedCapabilities {
+    pub(crate) fn capabilities() -> PrivilegedCapabilities {
         broker_path()
             .and_then(|path| query_capabilities(&path))
             .unwrap_or_else(|| PrivilegedCapabilities {
@@ -128,7 +128,7 @@ impl PrivilegedWorkflow {
         &self,
         operation: MaintenanceOperation,
     ) -> Result<PrivilegedExecutionChallenge, String> {
-        let capabilities = self.capabilities();
+        let capabilities = Self::capabilities();
         if !capabilities.service_available {
             return Err("管理员服务未安装或版本不可用。".to_owned());
         }
@@ -142,7 +142,7 @@ impl PrivilegedWorkflow {
         &self,
         assessment: PartitionSafetyAssessment,
     ) -> Result<PartitionExecutionPreparation, String> {
-        let capabilities = self.capabilities();
+        let capabilities = Self::capabilities();
         let ready = assessment.status == PartitionSafetyStatus::FoundationReady
             && !assessment.execution_authorized
             && !assessment.write_capability_present

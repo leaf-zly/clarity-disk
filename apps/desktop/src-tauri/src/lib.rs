@@ -295,9 +295,7 @@ fn build_partition_safety_assessment(
 /// Returns the installed one-shot administrator broker capability handshake.
 #[tauri::command]
 fn get_privileged_capabilities() -> clarity_privileged_protocol::PrivilegedCapabilities {
-    PRIVILEGED_WORKFLOW
-        .get_or_init(privileged_workflow::PrivilegedWorkflow::default)
-        .capabilities()
+    privileged_workflow::PrivilegedWorkflow::capabilities()
 }
 
 /// Issues a one-time challenge for one fixed privileged maintenance adapter.

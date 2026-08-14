@@ -77,12 +77,9 @@ fn stage_candidate_at(
             skipped_items = skipped_items.saturating_add(1);
             continue;
         }
-        let metadata = match fs::symlink_metadata(&original_path) {
-            Ok(metadata) => metadata,
-            Err(_) => {
-                skipped_items = skipped_items.saturating_add(1);
-                continue;
-            }
+        let Ok(metadata) = fs::symlink_metadata(&original_path) else {
+            skipped_items = skipped_items.saturating_add(1);
+            continue;
         };
         if is_unsafe_indirection(&metadata)
             || !original_path.starts_with(&root)

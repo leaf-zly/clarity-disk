@@ -83,7 +83,7 @@ impl QuarantineStore {
             files_moved: false,
             total_bytes: 0,
         });
-        index.plan_id = plan_id.to_owned();
+        plan_id.clone_into(&mut index.plan_id);
         index
             .entries
             .retain(|existing| existing.entry_id != entry.entry_id);

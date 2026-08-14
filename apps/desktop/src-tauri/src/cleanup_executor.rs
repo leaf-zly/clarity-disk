@@ -1,5 +1,6 @@
 //! Restricted cleanup execution with allow-listed adapters and recoverable transfers.
 
+use std::fmt::Write;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -83,10 +84,11 @@ fn stage_candidate_at(
         match adapter.target {
             AdapterTarget::RootContents => {
                 validate_directory_root(&root)?;
-                for item in fs::read_dir(&root).map_err(CleanupExecutorError::ReadRoot)? {
-                    if let Ok(item) = item {
-                        items.push((root.clone(), item.path()));
-                    }
+                for item in fs::read_dir(&root)
+                    .map_err(CleanupExecutorError::ReadRoot)?
+                    .flatten()
+                {
+                    items.push((root.clone(), item.path()));
                 }
             }
             AdapterTarget::ExactItems => {
@@ -536,8 +538,10 @@ fn format_digest(digest: impl AsRef<[u8]>) -> String {
     digest
         .as_ref()
         .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+        .fold(String::new(), |mut output, byte| {
+            write!(output, "{byte:02x}").expect("writing to a String cannot fail");
+            output
+        })
 }
 
 fn item_size(path: &Path, metadata: &fs::Metadata) -> u64 {
@@ -655,6 +659,7 @@ pub(crate) enum CleanupExecutorError {
     #[error("Windows Recycle Bin API failed with HRESULT {0}")]
     RecycleBinApi(i32),
     #[error("Windows Recycle Bin cleanup is only supported on Windows")]
+    #[cfg(not(windows))]
     UnsupportedPlatform,
 }
 

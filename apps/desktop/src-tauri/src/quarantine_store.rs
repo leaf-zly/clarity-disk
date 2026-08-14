@@ -264,7 +264,7 @@ pub(crate) enum QuarantineStoreError {
 mod tests {
     use std::fs;
 
-    use clarity_core::{QuarantineEntry, QuarantineEntryStatus, QuarantineIndex};
+    use clarity_core::{QuarantineEntry, QuarantineEntryStatus, QuarantineIndex, QuarantinePolicy};
 
     use super::QuarantineStore;
 

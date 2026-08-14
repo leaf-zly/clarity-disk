@@ -10,7 +10,10 @@ export interface CleanupAuditEvent {
     | "executionStarted"
     | "executionCompleted"
     | "quarantineRestoreStarted"
-    | "quarantineRestoreCompleted";
+    | "quarantineRestoreCompleted"
+    | "quarantineBatchRestoreStarted"
+    | "quarantineBatchRestoreCompleted"
+    | "quarantinePolicyUpdated";
   subjectId: string;
   occurredAtUnixMs: number;
   reason: string | null;

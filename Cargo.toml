@@ -20,7 +20,9 @@ tauri = "2.11.5"
 thiserror = "2.0.20"
 
 [workspace.lints.rust]
-unsafe_code = "forbid"
+# Windows system APIs require a very small, reviewed FFI boundary. Unsafe code
+# remains denied by default and is enabled only at the documented call site.
+unsafe_code = "deny"
 missing_docs = "warn"
 
 [workspace.lints.clippy]

@@ -108,6 +108,9 @@ pub struct CleanupCandidate {
     pub description: String,
     /// Allow-listed path discovered by the platform adapter.
     pub path: String,
+    /// Backend-owned roots used for execution; the display path is never parsed.
+    #[serde(default)]
+    pub execution_roots: Vec<String>,
     /// Human-readable evidence explaining why the candidate was produced.
     pub evidence: Vec<String>,
     /// Bytes that could be reclaimed if this candidate is later approved.
@@ -200,6 +203,12 @@ pub enum AuditEventKind {
     QuarantineRestoreStarted,
     /// A quarantined item was restored or safely rejected because of a conflict.
     QuarantineRestoreCompleted,
+    /// A batch restore wrote its durable start audit before filesystem work.
+    QuarantineBatchRestoreStarted,
+    /// A batch restore completed with per-entry conflict-safe results.
+    QuarantineBatchRestoreCompleted,
+    /// The restricted quarantine retention or capacity policy changed.
+    QuarantinePolicyUpdated,
 }
 
 /// Minimal, privacy-preserving audit record for cleanup safety decisions.
@@ -232,12 +241,68 @@ pub enum QuarantineEntryStatus {
     PreviewOnly,
     /// A durable recovery record exists and movement may be in progress.
     Staging,
+    /// A cross-volume copy is in progress and the source remains authoritative.
+    Copying,
+    /// A cross-volume copy was verified; both copies may exist pending review.
+    CopyVerified,
     /// The item was moved into the application-owned quarantine directory.
     Staged,
     /// The item was restored to its original location.
     Restored,
     /// Restore was refused because the original location is occupied.
     RestoreConflict,
+    /// A restore transfer is in progress and neither copy may be discarded blindly.
+    Restoring,
+    /// Retention elapsed; content remains recoverable and is not auto-deleted.
+    Expired,
+}
+
+/// Transfer strategy used for a quarantine entry.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum QuarantineTransferKind {
+    /// Same-volume atomic rename.
+    #[default]
+    Rename,
+    /// Cross-volume copy verified before the original was removed.
+    VerifiedCopy,
+}
+
+/// Restricted retention and capacity policy for application quarantine.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuarantinePolicy {
+    /// Retention period. Only 7, 15, or 30 days are accepted.
+    pub retention_days: u16,
+    /// Maximum indexed staged bytes. Only approved GiB tiers are accepted.
+    pub max_bytes: u64,
+}
+
+impl Default for QuarantinePolicy {
+    fn default() -> Self {
+        Self {
+            retention_days: 30,
+            max_bytes: 10 * 1024 * 1024 * 1024,
+        }
+    }
+}
+
+impl QuarantinePolicy {
+    /// Validates that policy values belong to the reviewed fixed tiers.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`QuarantinePolicyError`] for arbitrary retention or capacity values.
+    pub fn validate(self) -> Result<Self, QuarantinePolicyError> {
+        if ![7, 15, 30].contains(&self.retention_days) {
+            return Err(QuarantinePolicyError::UnsupportedRetention);
+        }
+        const GIB: u64 = 1024 * 1024 * 1024;
+        if ![GIB, 5 * GIB, 10 * GIB, 20 * GIB].contains(&self.max_bytes) {
+            return Err(QuarantinePolicyError::UnsupportedCapacity);
+        }
+        Ok(self)
+    }
 }
 
 /// Locally persisted metadata for preview, staging, and restoration.
@@ -268,6 +333,18 @@ pub struct QuarantineEntry {
     /// Time when restoration completed, in Unix milliseconds.
     #[serde(default)]
     pub restored_at_unix_ms: Option<u64>,
+    /// Time when retention expires; expiry never deletes content automatically.
+    #[serde(default)]
+    pub expires_at_unix_ms: Option<u64>,
+    /// Whether staging used an atomic rename or a verified copy transaction.
+    #[serde(default)]
+    pub transfer_kind: QuarantineTransferKind,
+    /// SHA-256 tree integrity digest recorded for verified-copy transactions.
+    #[serde(default)]
+    pub integrity_digest: Option<String>,
+    /// Backend-owned temporary transaction path used for crash reconciliation.
+    #[serde(default)]
+    pub transaction_path: Option<String>,
 }
 
 /// Persisted quarantine index containing previews and durable recovery records.
@@ -286,6 +363,45 @@ pub struct QuarantineIndex {
     pub files_moved: bool,
     /// Aggregate bytes represented by indexed entries.
     pub total_bytes: u64,
+    /// Current reviewed retention and capacity policy.
+    #[serde(default)]
+    pub policy: QuarantinePolicy,
+}
+
+/// Request to update quarantine policy using fixed reviewed values only.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateQuarantinePolicyRequest {
+    /// Approved retention tier in days.
+    pub retention_days: u16,
+    /// Approved capacity tier in bytes.
+    pub max_bytes: u64,
+}
+
+impl UpdateQuarantinePolicyRequest {
+    /// Converts the request into a validated policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when either value is outside its reviewed allow-list.
+    pub fn policy(self) -> Result<QuarantinePolicy, QuarantinePolicyError> {
+        QuarantinePolicy {
+            retention_days: self.retention_days,
+            max_bytes: self.max_bytes,
+        }
+        .validate()
+    }
+}
+
+/// Execution boundary selected before issuing a one-time confirmation.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CleanupExecutionMode {
+    /// Move allow-listed cache content into recoverable quarantine.
+    #[default]
+    Quarantine,
+    /// Permanently empty Windows Recycle Bin through the official Shell API.
+    WindowsRecycleBin,
 }
 
 /// Request to issue a one-time confirmation for executable plan candidates.
@@ -296,6 +412,9 @@ pub struct PrepareCleanupExecutionRequest {
     pub plan_id: String,
     /// Candidate identities copied from that plan; paths are never accepted.
     pub candidate_ids: Vec<String>,
+    /// Execution boundary; incompatible rule families cannot be mixed.
+    #[serde(default)]
+    pub mode: CleanupExecutionMode,
 }
 
 /// Short-lived one-time challenge shown before a restricted cleanup execution.
@@ -310,6 +429,8 @@ pub struct CleanupExecutionChallenge {
     pub plan_digest: String,
     /// Candidate IDs approved after fresh read-only validation.
     pub candidate_ids: Vec<String>,
+    /// Execution boundary cryptographically bound to this challenge.
+    pub mode: CleanupExecutionMode,
     /// Opaque one-time token; it never grants arbitrary filesystem access.
     pub confirmation_token: String,
     /// Exact localized phrase required from the explicit confirmation UI.
@@ -370,10 +491,14 @@ pub struct CleanupExecutionReport {
     pub execution_id: String,
     /// Immutable plan that was revalidated.
     pub plan_id: String,
+    /// Execution boundary that produced this report.
+    pub mode: CleanupExecutionMode,
     /// Candidate-level terminal outcomes.
     pub results: Vec<CleanupExecutionItemResult>,
     /// Total bytes successfully staged.
     pub staged_bytes: u64,
+    /// Read-only estimate processed by Windows-managed operations.
+    pub estimated_processed_bytes: u64,
     /// Execution start time in Unix milliseconds.
     pub started_at_unix_ms: u64,
     /// Execution finish time in Unix milliseconds.
@@ -390,6 +515,14 @@ pub struct RestoreQuarantineRequest {
     pub entry_id: String,
 }
 
+/// Request to restore multiple entries by backend-owned identities.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreQuarantineBatchRequest {
+    /// Unique backend entry IDs; paths are never accepted.
+    pub entry_ids: Vec<String>,
+}
+
 /// Result of a conflict-safe quarantine restoration attempt.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -402,9 +535,21 @@ pub struct QuarantineRestoreResult {
     pub reason: String,
 }
 
+/// Per-entry report for one bounded batch restore.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuarantineRestoreBatchReport {
+    /// Conflict-safe results in request order.
+    pub results: Vec<QuarantineRestoreResult>,
+    /// Latest persisted quarantine state.
+    pub index: QuarantineIndex,
+}
+
 const PLAN_TTL_MS: u64 = 10 * 60 * 1000;
 /// Exact phrase required by the first restricted execution workflow.
 pub const CLEANUP_CONFIRMATION_PHRASE: &str = "确认移入隔离区";
+/// Exact phrase required before permanently emptying Windows Recycle Bin.
+pub const RECYCLE_BIN_CONFIRMATION_PHRASE: &str = "确认永久清空回收站";
 
 impl CleanupPlan {
     /// Builds a deterministic, non-authorizing plan from default-selected items.
@@ -622,6 +767,10 @@ impl QuarantineIndex {
                 status: QuarantineEntryStatus::PreviewOnly,
                 moved_at_unix_ms: None,
                 restored_at_unix_ms: None,
+                expires_at_unix_ms: None,
+                transfer_kind: QuarantineTransferKind::Rename,
+                integrity_digest: None,
+                transaction_path: None,
             })
             .collect();
         if entries.is_empty() {
@@ -639,6 +788,7 @@ impl QuarantineIndex {
             entries,
             files_moved: false,
             total_bytes,
+            policy: QuarantinePolicy::default(),
         })
     }
 }
@@ -648,6 +798,7 @@ fn same_execution_snapshot(planned: &CleanupCandidate, current: &CleanupCandidat
         && planned.rule_id == current.rule_id
         && planned.rule_version == current.rule_version
         && planned.path == current.path
+        && planned.execution_roots == current.execution_roots
         && planned.bytes == current.bytes
         && planned.item_count == current.item_count
         && planned.risk == current.risk
@@ -778,6 +929,17 @@ pub enum QuarantineError {
     BytesOverflow,
 }
 
+/// Validation errors for restricted quarantine policy updates.
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
+pub enum QuarantinePolicyError {
+    /// Retention is not one of the reviewed 7, 15, or 30-day tiers.
+    #[error("unsupported quarantine retention tier")]
+    UnsupportedRetention,
+    /// Capacity is not one of the reviewed 1, 5, 10, or 20 GiB tiers.
+    #[error("unsupported quarantine capacity tier")]
+    UnsupportedCapacity,
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -795,6 +957,7 @@ mod tests {
             title: "浏览器缓存".to_owned(),
             description: "可重新生成的缓存内容".to_owned(),
             path: "C:\\Users\\demo\\Cache".to_owned(),
+            execution_roots: vec!["C:\\Users\\demo\\Cache".to_owned()],
             evidence: vec!["允许目录中的元数据快照".to_owned()],
             bytes,
             item_count: 3,

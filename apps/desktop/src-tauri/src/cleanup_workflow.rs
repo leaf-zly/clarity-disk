@@ -11,10 +11,12 @@ use crate::cleanup_scan;
 use crate::quarantine_store::QuarantineStore;
 use clarity_core::{
     AuditEvent, AuditEventKind, CLEANUP_CONFIRMATION_PHRASE, CleanupExecutionChallenge,
-    CleanupExecutionItemResult, CleanupExecutionItemStatus, CleanupExecutionReport, CleanupPlan,
-    CleanupPreview, ExecuteCleanupRequest, PrepareCleanupExecutionRequest,
-    PrepareCleanupPlanRequest, QuarantineEntryStatus, QuarantineIndex, QuarantineRestoreResult,
-    RestoreQuarantineRequest,
+    CleanupExecutionItemResult, CleanupExecutionItemStatus, CleanupExecutionMode,
+    CleanupExecutionReport, CleanupPlan, CleanupPreview, ExecuteCleanupRequest,
+    PrepareCleanupExecutionRequest, PrepareCleanupPlanRequest, QuarantineEntryStatus,
+    QuarantineIndex, QuarantineRestoreBatchReport, QuarantineRestoreResult,
+    RECYCLE_BIN_CONFIRMATION_PHRASE, RestoreQuarantineBatchRequest, RestoreQuarantineRequest,
+    UpdateQuarantinePolicyRequest,
 };
 
 const EXECUTION_CHALLENGE_TTL_MS: u64 = 2 * 60 * 1000;
@@ -156,11 +158,19 @@ impl CleanupWorkflow {
         let candidates = plan
             .validate_fresh_snapshot(&fresh, &request.candidate_ids)
             .map_err(|error| error.to_string())?;
-        if candidates
-            .iter()
-            .any(|candidate| !cleanup_executor::is_executable(candidate))
-        {
-            return Err("当前选择包含尚未开放执行的规则；仅用户临时文件支持隔离".to_owned());
+        let valid_mode = match request.mode {
+            CleanupExecutionMode::Quarantine => candidates
+                .iter()
+                .all(cleanup_executor::is_quarantine_executable),
+            CleanupExecutionMode::WindowsRecycleBin => {
+                candidates.len() == 1
+                    && candidates
+                        .iter()
+                        .all(cleanup_executor::is_recycle_bin_executable)
+            }
+        };
+        if !valid_mode {
+            return Err("当前选择混合了不兼容或尚未开放的清理规则".to_owned());
         }
         let now = unix_ms();
         let (authorization_id, confirmation_token) = execution_credentials()?;
@@ -169,8 +179,13 @@ impl CleanupWorkflow {
             plan_id: plan.plan_id.clone(),
             plan_digest: plan.plan_digest.clone(),
             candidate_ids: request.candidate_ids.clone(),
+            mode: request.mode,
             confirmation_token,
-            confirmation_phrase: CLEANUP_CONFIRMATION_PHRASE.to_owned(),
+            confirmation_phrase: match request.mode {
+                CleanupExecutionMode::Quarantine => CLEANUP_CONFIRMATION_PHRASE,
+                CleanupExecutionMode::WindowsRecycleBin => RECYCLE_BIN_CONFIRMATION_PHRASE,
+            }
+            .to_owned(),
             expires_at_unix_ms: now.saturating_add(EXECUTION_CHALLENGE_TTL_MS),
         };
         self.audit
@@ -221,21 +236,39 @@ impl CleanupWorkflow {
             .record(event_for_execution_start(&pending.challenge, &candidates))
             .map_err(|error| error.to_string())?;
         let mut results = Vec::with_capacity(candidates.len());
-        for candidate in &candidates {
-            let result = cleanup_executor::stage_candidate(
-                &pending.plan.plan_id,
-                candidate,
-                &self.quarantine,
-            )
-            .unwrap_or_else(|error| CleanupExecutionItemResult {
-                candidate_id: candidate.id.clone(),
-                status: CleanupExecutionItemStatus::Skipped,
-                staged_bytes: 0,
-                staged_items: 0,
-                skipped_items: candidate.item_count,
-                reason: error.to_string(),
-            });
-            results.push(result);
+        let mut estimated_processed_bytes = 0;
+        match pending.challenge.mode {
+            CleanupExecutionMode::Quarantine => {
+                for candidate in &candidates {
+                    let result = cleanup_executor::stage_candidate(
+                        &pending.plan.plan_id,
+                        candidate,
+                        &self.quarantine,
+                    )
+                    .unwrap_or_else(|error| CleanupExecutionItemResult {
+                        candidate_id: candidate.id.clone(),
+                        status: CleanupExecutionItemStatus::Skipped,
+                        staged_bytes: 0,
+                        staged_items: 0,
+                        skipped_items: candidate.item_count,
+                        reason: error.to_string(),
+                    });
+                    results.push(result);
+                }
+            }
+            CleanupExecutionMode::WindowsRecycleBin => {
+                let candidate = &candidates[0];
+                cleanup_executor::empty_windows_recycle_bin().map_err(|error| error.to_string())?;
+                estimated_processed_bytes = candidate.bytes;
+                results.push(CleanupExecutionItemResult {
+                    candidate_id: candidate.id.clone(),
+                    status: CleanupExecutionItemStatus::Staged,
+                    staged_bytes: 0,
+                    staged_items: candidate.item_count,
+                    skipped_items: 0,
+                    reason: "Windows 已通过官方 Shell API 清空回收站".to_owned(),
+                });
+            }
         }
         let staged_bytes = results
             .iter()
@@ -245,8 +278,10 @@ impl CleanupWorkflow {
         let report = CleanupExecutionReport {
             execution_id: format!("execution-{}-{finished_at_unix_ms}", pending.plan.plan_id),
             plan_id: pending.plan.plan_id,
+            mode: pending.challenge.mode,
             results,
             staged_bytes,
+            estimated_processed_bytes,
             started_at_unix_ms,
             finished_at_unix_ms,
             execution_authorized: true,
@@ -280,8 +315,13 @@ impl CleanupWorkflow {
         self.audit
             .record(event_for_restore_start(&entry))
             .map_err(|error| error.to_string())?;
+        let mut restoring = entry.clone();
+        restoring.status = QuarantineEntryStatus::Restoring;
+        self.quarantine
+            .replace_entry(restoring.clone())
+            .map_err(|error| error.to_string())?;
         let (updated, result) =
-            cleanup_executor::restore_entry(&entry).map_err(|error| error.to_string())?;
+            cleanup_executor::restore_entry(&restoring).map_err(|error| error.to_string())?;
         self.quarantine
             .replace_entry(updated)
             .map_err(|error| error.to_string())?;
@@ -289,6 +329,84 @@ impl CleanupWorkflow {
             .record(event_for_restore(&result, &entry))
             .map_err(|error| error.to_string())?;
         Ok(result)
+    }
+
+    /// Restores up to 100 unique backend-indexed entries in request order.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for empty, duplicate, oversized, or unknown selections,
+    /// or when durable audit/state persistence fails.
+    pub(crate) fn restore_batch(
+        &self,
+        request: &RestoreQuarantineBatchRequest,
+    ) -> Result<QuarantineRestoreBatchReport, String> {
+        if request.entry_ids.is_empty() || request.entry_ids.len() > 100 {
+            return Err("批量恢复必须选择 1 到 100 个项目".to_owned());
+        }
+        let unique: std::collections::HashSet<_> = request.entry_ids.iter().collect();
+        if unique.len() != request.entry_ids.len() {
+            return Err("批量恢复不能包含重复项目".to_owned());
+        }
+        self.audit
+            .record(batch_event(
+                AuditEventKind::QuarantineBatchRestoreStarted,
+                request,
+                0,
+            ))
+            .map_err(|error| error.to_string())?;
+        let mut results = Vec::with_capacity(request.entry_ids.len());
+        for entry_id in &request.entry_ids {
+            results.push(self.restore(&RestoreQuarantineRequest {
+                entry_id: entry_id.clone(),
+            })?);
+        }
+        let restored = results
+            .iter()
+            .filter(|result| result.status == QuarantineEntryStatus::Restored)
+            .count() as u64;
+        self.audit
+            .record(batch_event(
+                AuditEventKind::QuarantineBatchRestoreCompleted,
+                request,
+                restored,
+            ))
+            .map_err(|error| error.to_string())?;
+        Ok(QuarantineRestoreBatchReport {
+            results,
+            index: self
+                .quarantine
+                .get()
+                .ok_or_else(|| "隔离区索引不存在".to_owned())?,
+        })
+    }
+
+    /// Updates the fixed-tier quarantine policy without deleting content.
+    pub(crate) fn update_policy(
+        &self,
+        request: UpdateQuarantinePolicyRequest,
+    ) -> Result<QuarantineIndex, String> {
+        let policy = request.policy().map_err(|error| error.to_string())?;
+        let index = self
+            .quarantine
+            .update_policy(policy)
+            .map_err(|error| error.to_string())?;
+        self.audit
+            .record(AuditEvent {
+                event_id: format!("audit-policy-{}", unix_ms()),
+                kind: AuditEventKind::QuarantinePolicyUpdated,
+                subject_id: index.index_id.clone(),
+                occurred_at_unix_ms: unix_ms(),
+                reason: Some(format!(
+                    "隔离策略更新为 {} 天，容量 {} 字节；未删除内容",
+                    policy.retention_days, policy.max_bytes
+                )),
+                candidate_count: 0,
+                total_bytes: index.total_bytes,
+                rule_ids: vec![],
+            })
+            .map_err(|error| error.to_string())?;
+        Ok(index)
     }
 
     /// Returns newest privacy-preserving cleanup audit events.
@@ -466,6 +584,26 @@ fn event_for_restore_start(entry: &clarity_core::QuarantineEntry) -> AuditEvent 
     }
 }
 
+fn batch_event(
+    kind: AuditEventKind,
+    request: &RestoreQuarantineBatchRequest,
+    restored_count: u64,
+) -> AuditEvent {
+    AuditEvent {
+        event_id: format!("audit-batch-restore-{}", unix_ms()),
+        kind,
+        subject_id: format!("batch-{}", unix_ms()),
+        occurred_at_unix_ms: unix_ms(),
+        reason: Some(format!(
+            "批量恢复涉及 {} 个项目，已恢复 {restored_count} 个",
+            request.entry_ids.len()
+        )),
+        candidate_count: request.entry_ids.len() as u64,
+        total_bytes: 0,
+        rule_ids: vec![],
+    }
+}
+
 fn validate_confirmation(
     challenge: &CleanupExecutionChallenge,
     request: &ExecuteCleanupRequest,
@@ -508,7 +646,7 @@ fn unix_ms() -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use clarity_core::{CleanupExecutionChallenge, ExecuteCleanupRequest};
+    use clarity_core::{CleanupExecutionChallenge, CleanupExecutionMode, ExecuteCleanupRequest};
 
     use super::{execution_credentials, validate_confirmation};
 
@@ -518,6 +656,7 @@ mod tests {
             plan_id: "plan-1".to_owned(),
             plan_digest: "digest".to_owned(),
             candidate_ids: vec!["user-temp.v1".to_owned()],
+            mode: CleanupExecutionMode::Quarantine,
             confirmation_token: "token".to_owned(),
             confirmation_phrase: "确认移入隔离区".to_owned(),
             expires_at_unix_ms,

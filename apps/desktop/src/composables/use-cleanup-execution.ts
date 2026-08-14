@@ -4,16 +4,27 @@ import {
   executeCleanup,
   getExecutionQuarantineIndex,
   prepareCleanupExecution,
+  restoreQuarantineBatch,
   restoreQuarantineEntry,
+  updateQuarantinePolicy,
 } from "@/services/cleanup-execution-service";
 import type { CleanupPlan } from "@/types/dashboard";
 import type {
   CleanupExecutionChallenge,
+  CleanupExecutionMode,
   CleanupExecutionReport,
   QuarantineExecutionIndex,
+  QuarantinePolicy,
 } from "@/types/cleanup-execution";
 
-/** Reactive state machine for one-time confirmation, execution, and restoration. */
+const QUARANTINE_RULES = new Set([
+  "user-temp.v1",
+  "browser-cache.v1",
+  "thumbnail-cache.v1",
+  "build-cache.v1",
+]);
+
+/** Reactive state machine for mode-bound execution, policy, and restoration. */
 export function useCleanupExecution() {
   const challenge = shallowRef<CleanupExecutionChallenge>();
   const report = shallowRef<CleanupExecutionReport>();
@@ -22,25 +33,37 @@ export function useCleanupExecution() {
   const isPreparing = shallowRef(false);
   const isExecuting = shallowRef(false);
   const restoringEntryId = shallowRef<string>();
+  const isRestoringBatch = shallowRef(false);
+  const isUpdatingPolicy = shallowRef(false);
 
-  /** Freshly validates executable plan candidates and requests a short-lived challenge. */
-  async function prepare(plan: CleanupPlan | undefined): Promise<void> {
+  /** Requests a fresh challenge for one non-mixed execution boundary. */
+  async function prepare(
+    plan: CleanupPlan | undefined,
+    mode: CleanupExecutionMode,
+  ): Promise<void> {
     if (!plan) {
-      error.value = "请先生成包含用户临时文件的安全计划。";
+      error.value = "请先生成当前选择的安全计划。";
       return;
     }
     const candidateIds = plan.candidates
-      .filter((candidate) => candidate.ruleId === "user-temp.v1")
+      .filter((candidate) =>
+        mode === "quarantine"
+          ? QUARANTINE_RULES.has(candidate.ruleId)
+          : candidate.ruleId === "recycle-bin.v1",
+      )
       .map((candidate) => candidate.id);
     if (!candidateIds.length) {
-      error.value = "当前计划没有已开放执行的隔离项目。";
+      error.value =
+        mode === "quarantine"
+          ? "当前计划没有已开放执行的隔离项目。"
+          : "当前计划没有回收站候选项目。";
       return;
     }
     isPreparing.value = true;
     error.value = undefined;
     try {
       challenge.value = await prepareCleanupExecution(
-        { planId: plan.planId, candidateIds },
+        { planId: plan.planId, candidateIds, mode },
         plan,
       );
       report.value = undefined;
@@ -51,7 +74,7 @@ export function useCleanupExecution() {
     }
   }
 
-  /** Consumes the current challenge after exact-phrase confirmation. */
+  /** Consumes the current one-time challenge after exact-phrase confirmation. */
   async function execute(
     plan: CleanupPlan | undefined,
     confirmationPhrase: string,
@@ -63,8 +86,6 @@ export function useCleanupExecution() {
     isExecuting.value = true;
     error.value = undefined;
     const current = challenge.value;
-    // Clear client state before awaiting so rapid double clicks cannot submit
-    // the same one-time token twice from the UI.
     challenge.value = undefined;
     try {
       report.value = await executeCleanup(
@@ -77,10 +98,7 @@ export function useCleanupExecution() {
       );
       await refresh();
     } catch (cause) {
-      error.value = readableError(
-        cause,
-        "隔离执行失败；令牌已失效，请重新校验。",
-      );
+      error.value = readableError(cause, "执行失败；令牌已失效，请重新校验。");
     } finally {
       isExecuting.value = false;
     }
@@ -101,6 +119,37 @@ export function useCleanupExecution() {
     }
   }
 
+  /** Restores a bounded selection using backend entry IDs only. */
+  async function restoreBatch(entryIds: string[]): Promise<void> {
+    isRestoringBatch.value = true;
+    error.value = undefined;
+    try {
+      const result = await restoreQuarantineBatch(entryIds);
+      quarantine.value = result.index;
+      const conflict = result.results.find(
+        (item) => item.status === "restoreConflict",
+      );
+      if (conflict) error.value = conflict.reason;
+    } catch (cause) {
+      error.value = readableError(cause, "批量恢复失败，未覆盖任何文件。");
+    } finally {
+      isRestoringBatch.value = false;
+    }
+  }
+
+  /** Applies a fixed-tier policy; this action never deletes content. */
+  async function updatePolicy(policy: QuarantinePolicy): Promise<void> {
+    isUpdatingPolicy.value = true;
+    error.value = undefined;
+    try {
+      quarantine.value = await updateQuarantinePolicy(policy);
+    } catch (cause) {
+      error.value = readableError(cause, "隔离策略更新失败。");
+    } finally {
+      isUpdatingPolicy.value = false;
+    }
+  }
+
   /** Reloads the latest persisted execution quarantine state. */
   async function refresh(): Promise<void> {
     quarantine.value = (await getExecutionQuarantineIndex()) ?? undefined;
@@ -114,9 +163,13 @@ export function useCleanupExecution() {
     isPreparing: readonly(isPreparing),
     isExecuting: readonly(isExecuting),
     restoringEntryId: readonly(restoringEntryId),
+    isRestoringBatch: readonly(isRestoringBatch),
+    isUpdatingPolicy: readonly(isUpdatingPolicy),
     prepare,
     execute,
     restore,
+    restoreBatch,
+    updatePolicy,
     refresh,
   };
 }

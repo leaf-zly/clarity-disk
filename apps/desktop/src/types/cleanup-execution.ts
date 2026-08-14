@@ -1,9 +1,13 @@
 import type { CleanupCandidate, CleanupPlan } from "@/types/dashboard";
 
+/** Mutually exclusive restricted execution boundaries. */
+export type CleanupExecutionMode = "quarantine" | "windowsRecycleBin";
+
 /** Candidate identities used to request a freshly validated confirmation. */
 export interface PrepareCleanupExecutionRequest {
   planId: string;
   candidateIds: string[];
+  mode: CleanupExecutionMode;
 }
 
 /** Short-lived, one-time challenge for a restricted quarantine execution. */
@@ -12,6 +16,7 @@ export interface CleanupExecutionChallenge {
   planId: string;
   planDigest: string;
   candidateIds: string[];
+  mode: CleanupExecutionMode;
   confirmationToken: string;
   confirmationPhrase: string;
   expiresAtUnixMs: number;
@@ -42,8 +47,10 @@ export interface CleanupExecutionItemResult {
 export interface CleanupExecutionReport {
   executionId: string;
   planId: string;
+  mode: CleanupExecutionMode;
   results: CleanupExecutionItemResult[];
   stagedBytes: number;
+  estimatedProcessedBytes: number;
   startedAtUnixMs: number;
   finishedAtUnixMs: number;
   executionAuthorized: boolean;
@@ -51,7 +58,24 @@ export interface CleanupExecutionReport {
 
 /** Lifecycle state persisted for a backend-owned quarantine entry. */
 export type QuarantineEntryStatus =
-  "previewOnly" | "staging" | "staged" | "restored" | "restoreConflict";
+  | "previewOnly"
+  | "staging"
+  | "copying"
+  | "copyVerified"
+  | "staged"
+  | "restoring"
+  | "restored"
+  | "restoreConflict"
+  | "expired";
+
+/** Transfer mechanism recorded for recovery and crash reconciliation. */
+export type QuarantineTransferKind = "rename" | "verifiedCopy";
+
+/** Fixed-tier quarantine policy; arbitrary values are rejected by Rust. */
+export interface QuarantinePolicy {
+  retentionDays: 7 | 15 | 30;
+  maxBytes: number;
+}
 
 /** Backend-owned quarantine entry; paths are display-only and never submitted. */
 export interface QuarantineExecutionEntry {
@@ -65,6 +89,10 @@ export interface QuarantineExecutionEntry {
   status: QuarantineEntryStatus;
   movedAtUnixMs: number | null;
   restoredAtUnixMs: number | null;
+  expiresAtUnixMs: number | null;
+  transferKind: QuarantineTransferKind;
+  integrityDigest: string | null;
+  transactionPath: string | null;
 }
 
 /** Persisted quarantine state returned after staging or restoration. */
@@ -75,6 +103,7 @@ export interface QuarantineExecutionIndex {
   entries: QuarantineExecutionEntry[];
   filesMoved: boolean;
   totalBytes: number;
+  policy: QuarantinePolicy;
 }
 
 /** Conflict-safe restore result for one backend-indexed entry. */
@@ -82,6 +111,66 @@ export interface QuarantineRestoreResult {
   entryId: string;
   status: QuarantineEntryStatus;
   reason: string;
+}
+
+/** Bounded batch restore result with the latest persisted index. */
+export interface QuarantineRestoreBatchReport {
+  results: QuarantineRestoreResult[];
+  index: QuarantineExecutionIndex;
+}
+
+/** Fixed-tier policy update accepted by the restricted backend. */
+export interface UpdateQuarantinePolicyRequest {
+  retentionDays: 7 | 15 | 30;
+  maxBytes: number;
+}
+
+/** Bounded batch restore result with the latest persisted index. */
+export interface QuarantineRestoreBatchReport {
+  results: QuarantineRestoreResult[];
+  index: QuarantineExecutionIndex;
+}
+
+/** Fixed-tier policy update accepted by the restricted backend. */
+export interface UpdateQuarantinePolicyRequest {
+  retentionDays: 7 | 15 | 30;
+  maxBytes: number;
+}
+
+/** Bounded batch restore result with the latest persisted index. */
+export interface QuarantineRestoreBatchReport {
+  results: QuarantineRestoreResult[];
+  index: QuarantineExecutionIndex;
+}
+
+/** Fixed-tier policy update accepted by the restricted backend. */
+export interface UpdateQuarantinePolicyRequest {
+  retentionDays: 7 | 15 | 30;
+  maxBytes: number;
+}
+
+/** Bounded batch restore result with the latest persisted index. */
+export interface QuarantineRestoreBatchReport {
+  results: QuarantineRestoreResult[];
+  index: QuarantineExecutionIndex;
+}
+
+/** Fixed-tier policy update accepted by the restricted backend. */
+export interface UpdateQuarantinePolicyRequest {
+  retentionDays: 7 | 15 | 30;
+  maxBytes: number;
+}
+
+/** Bounded batch restore result with the latest persisted index. */
+export interface QuarantineRestoreBatchReport {
+  results: QuarantineRestoreResult[];
+  index: QuarantineExecutionIndex;
+}
+
+/** Fixed-tier policy update accepted by the restricted backend. */
+export interface UpdateQuarantinePolicyRequest {
+  retentionDays: 7 | 15 | 30;
+  maxBytes: number;
 }
 
 /** Input needed by browser fixtures to mirror a backend execution challenge. */

@@ -24,6 +24,7 @@ const candidate = {
   title: "临时文件",
   description: "临时内容",
   path: "C:\\Temp",
+  executionRoots: [],
   evidence: ["固定目录"],
   bytes: 100,
   itemCount: 1,

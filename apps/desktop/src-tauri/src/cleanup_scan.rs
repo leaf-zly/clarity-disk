@@ -5,6 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::cleanup_adapters::allowed_roots;
 use clarity_core::{
     CleanupCandidate, CleanupError, CleanupPreview, CleanupRuleAvailability, CleanupRuleStatus,
     RecoveryStrategy, ScanProgress, ScanStatus, SuggestionRisk,
@@ -113,6 +114,7 @@ pub fn scan_cleanup_preview() -> Result<CleanupPreview, CleanupScanError> {
                 title: rule.title.to_owned(),
                 description: rule.description.to_owned(),
                 path: paths.join("；"),
+                execution_roots: paths,
                 evidence: vec![
                     rule.evidence.to_owned(),
                     format!("只读统计到 {items} 个项目，共 {bytes} 字节"),
@@ -198,7 +200,7 @@ fn cleanup_rules() -> Vec<CleanupRule> {
             recoverable: true,
             requires_admin: false,
             recovery_strategy: RecoveryStrategy::Regenerate,
-            quarantine_eligible: false,
+            quarantine_eligible: true,
             default_selected: true,
         },
         CleanupRule {
@@ -213,7 +215,7 @@ fn cleanup_rules() -> Vec<CleanupRule> {
             recoverable: true,
             requires_admin: false,
             recovery_strategy: RecoveryStrategy::Regenerate,
-            quarantine_eligible: false,
+            quarantine_eligible: true,
             default_selected: true,
         },
         CleanupRule {
@@ -258,7 +260,7 @@ fn cleanup_rules() -> Vec<CleanupRule> {
             recoverable: true,
             requires_admin: false,
             recovery_strategy: RecoveryStrategy::Regenerate,
-            quarantine_eligible: false,
+            quarantine_eligible: true,
             default_selected: false,
         },
         CleanupRule {
@@ -267,9 +269,7 @@ fn cleanup_rules() -> Vec<CleanupRule> {
             title: "Windows 更新下载缓存",
             description: "Windows Update 已下载的安装缓存；本阶段仅统计，不停止服务、不删除",
             evidence: "仅命中 SystemRoot\\SoftwareDistribution\\Download 固定目录",
-            paths: system_root
-                .map(|root| vec![root.join("SoftwareDistribution/Download")])
-                .unwrap_or_default(),
+            paths: allowed_roots(WINDOWS_UPDATE_CACHE_RULE_ID),
             unavailable_reason: system_missing.then_some("SystemRoot 不可用，规则已安全跳过"),
             risk: SuggestionRisk::ConfirmationRequired,
             recoverable: true,
@@ -282,42 +282,26 @@ fn cleanup_rules() -> Vec<CleanupRule> {
 }
 
 fn browser_cache_paths(local_app_data: &Path) -> Vec<PathBuf> {
-    vec![
-        local_app_data.join("Google/Chrome/User Data/Default/Cache"),
-        local_app_data.join("Microsoft/Edge/User Data/Default/Cache"),
-        local_app_data.join("BraveSoftware/Brave-Browser/User Data/Default/Cache"),
-    ]
+    let _ = local_app_data;
+    allowed_roots(BROWSER_CACHE_RULE_ID)
 }
 
 fn thumbnail_cache_paths(local_app_data: &Path) -> Vec<PathBuf> {
-    let root = local_app_data.join("Microsoft/Windows/Explorer");
-    [32_u32, 96, 256, 768, 1280, 1600, 1920, 2560]
-        .into_iter()
-        .map(|size| root.join(format!("thumbcache_{size}.db")))
-        .collect()
+    let _ = local_app_data;
+    allowed_roots(THUMBNAIL_CACHE_RULE_ID)
 }
 
 fn temp_paths() -> Vec<PathBuf> {
-    std::env::var_os("TEMP")
-        .or_else(|| std::env::var_os("TMP"))
-        .map(PathBuf::from)
-        .into_iter()
-        .collect()
+    allowed_roots(USER_TEMP_RULE_ID)
 }
 
 fn recycle_bin_paths() -> Vec<PathBuf> {
-    std::env::var_os("SystemDrive")
-        .map(|drive| vec![PathBuf::from(drive).join("$Recycle.Bin")])
-        .unwrap_or_default()
+    allowed_roots(RECYCLE_BIN_RULE_ID)
 }
 
 fn build_cache_paths(local_app_data: &Path) -> Vec<PathBuf> {
-    vec![
-        local_app_data.join("npm-cache"),
-        local_app_data.join("Yarn/Cache"),
-        local_app_data.join("pnpm/store"),
-        local_app_data.join("NuGet/Cache"),
-    ]
+    let _ = local_app_data;
+    allowed_roots(BUILD_CACHE_RULE_ID)
 }
 
 fn measure_tree(

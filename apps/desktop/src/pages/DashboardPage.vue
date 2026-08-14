@@ -25,6 +25,10 @@ import {
   loadDashboardSnapshot,
 } from "@/services/dashboard-service";
 import type { CleanupPlan, DashboardSnapshot } from "@/types/dashboard";
+import type {
+  CleanupExecutionMode,
+  QuarantinePolicy,
+} from "@/types/cleanup-execution";
 
 const snapshot = shallowRef<DashboardSnapshot>();
 const loadError = shallowRef<string>();
@@ -71,9 +75,13 @@ const {
   isPreparing: isPreparingExecution,
   isExecuting,
   restoringEntryId,
+  isRestoringBatch,
+  isUpdatingPolicy,
   prepare: prepareExecution,
   execute: executeCleanup,
   restore: restoreQuarantineEntry,
+  restoreBatch: restoreQuarantineBatch,
+  updatePolicy: updateQuarantinePolicy,
   refresh: refreshExecutionQuarantine,
 } = useCleanupExecution();
 const selectedDisk = computed(() => {
@@ -136,8 +144,10 @@ function currentCleanupPlan(): CleanupPlan | undefined {
 }
 
 /** Freshly validates executable candidates and requests a one-time challenge. */
-async function prepareCleanupExecution(): Promise<void> {
-  await prepareExecution(currentCleanupPlan());
+async function prepareCleanupExecution(
+  mode: CleanupExecutionMode,
+): Promise<void> {
+  await prepareExecution(currentCleanupPlan(), mode);
   await refreshCleanupAuxiliaryState().catch(() => undefined);
 }
 
@@ -146,6 +156,18 @@ async function executeConfirmedCleanup(
   confirmationPhrase: string,
 ): Promise<void> {
   await executeCleanup(currentCleanupPlan(), confirmationPhrase);
+  await refreshCleanupAuxiliaryState().catch(() => undefined);
+}
+
+/** Restores a bounded backend-ID selection and refreshes the audit timeline. */
+async function restoreCleanupBatch(entryIds: string[]): Promise<void> {
+  await restoreQuarantineBatch(entryIds);
+  await refreshCleanupAuxiliaryState().catch(() => undefined);
+}
+
+/** Updates fixed-tier quarantine policy without deleting content. */
+async function updateCleanupPolicy(policy: QuarantinePolicy): Promise<void> {
+  await updateQuarantinePolicy(policy);
   await refreshCleanupAuxiliaryState().catch(() => undefined);
 }
 
@@ -235,9 +257,13 @@ onMounted(async () => {
         :is-preparing="isPreparingExecution"
         :is-executing="isExecuting"
         :restoring-entry-id="restoringEntryId"
+        :is-restoring-batch="isRestoringBatch"
+        :is-updating-policy="isUpdatingPolicy"
         @prepare-execution="prepareCleanupExecution"
         @execute="executeConfirmedCleanup"
         @restore="restoreCleanupEntry"
+        @restore-batch="restoreCleanupBatch"
+        @update-policy="updateCleanupPolicy"
       />
 
       <SpaceScanPanel

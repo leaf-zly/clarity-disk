@@ -7,11 +7,14 @@ mod space_scan;
 pub use cleanup::{
     AuditEvent, AuditEventKind, CLEANUP_CONFIRMATION_PHRASE, CleanupCandidate, CleanupError,
     CleanupExecutionChallenge, CleanupExecutionItemResult, CleanupExecutionItemStatus,
-    CleanupExecutionReport, CleanupPlan, CleanupPlanError, CleanupPreview, CleanupRuleAvailability,
-    CleanupRuleStatus, ExecuteCleanupRequest, PrepareCleanupExecutionRequest,
-    PrepareCleanupPlanRequest, QuarantineEntry, QuarantineEntryStatus, QuarantineError,
-    QuarantineIndex, QuarantineRestoreResult, RecoveryStrategy, RestoreQuarantineRequest,
-    ScanProgress, ScanStatus,
+    CleanupExecutionMode, CleanupExecutionReport, CleanupPlan, CleanupPlanError, CleanupPreview,
+    CleanupRuleAvailability, CleanupRuleStatus, ExecuteCleanupRequest,
+    PrepareCleanupExecutionRequest, PrepareCleanupPlanRequest, QuarantineEntry,
+    QuarantineEntryStatus, QuarantineError, QuarantineIndex, QuarantinePolicy,
+    QuarantinePolicyError, QuarantineRestoreBatchReport, QuarantineRestoreResult,
+    QuarantineTransferKind, RECYCLE_BIN_CONFIRMATION_PHRASE, RecoveryStrategy,
+    RestoreQuarantineBatchRequest, RestoreQuarantineRequest, ScanProgress, ScanStatus,
+    UpdateQuarantinePolicyRequest,
 };
 pub use dashboard::{
     CleanupSummary, DashboardError, DashboardSnapshot, DiskCategory, DiskCategoryKind, DiskHealth,

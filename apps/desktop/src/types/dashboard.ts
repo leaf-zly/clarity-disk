@@ -26,6 +26,8 @@ export interface CleanupCandidate {
   title: string;
   description: string;
   path: string;
+  /** Backend-owned roots used for execution; never parsed from the display path. */
+  executionRoots: string[];
   evidence: string[];
   bytes: number;
   itemCount: number;
@@ -76,7 +78,18 @@ export interface CleanupPlan {
 export interface AuditEvent {
   eventId: string;
   kind:
-    "scanCompleted" | "planCreated" | "planRejected" | "quarantineIndexCreated";
+    | "scanCompleted"
+    | "planCreated"
+    | "planRejected"
+    | "quarantineIndexCreated"
+    | "executionConfirmationIssued"
+    | "executionStarted"
+    | "executionCompleted"
+    | "quarantineRestoreStarted"
+    | "quarantineRestoreCompleted"
+    | "quarantineBatchRestoreStarted"
+    | "quarantineBatchRestoreCompleted"
+    | "quarantinePolicyUpdated";
   subjectId: string;
   occurredAtUnixMs: number;
   reason: string | null;

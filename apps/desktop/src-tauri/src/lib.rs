@@ -4,6 +4,7 @@ use clarity_core::{CleanupSummary, DashboardSnapshot, DiskHealth, Suggestion, Su
 use std::sync::OnceLock;
 
 mod audit_store;
+mod cleanup_adapters;
 mod cleanup_executor;
 mod cleanup_scan;
 mod cleanup_workflow;
@@ -152,6 +153,28 @@ fn restore_quarantine_entry(
         .restore(&request)
 }
 
+/// Restores a bounded batch using backend-owned entry identities only.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn restore_quarantine_batch(
+    request: clarity_core::RestoreQuarantineBatchRequest,
+) -> Result<clarity_core::QuarantineRestoreBatchReport, String> {
+    CLEANUP_WORKFLOW
+        .get_or_init(cleanup_workflow::CleanupWorkflow::default)
+        .restore_batch(&request)
+}
+
+/// Updates quarantine retention and capacity from reviewed fixed tiers.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn update_quarantine_policy(
+    request: clarity_core::UpdateQuarantinePolicyRequest,
+) -> Result<clarity_core::QuarantineIndex, String> {
+    CLEANUP_WORKFLOW
+        .get_or_init(cleanup_workflow::CleanupWorkflow::default)
+        .update_policy(request)
+}
+
 /// Starts a bounded, read-only directory scan.
 #[tauri::command]
 fn start_space_scan(
@@ -233,6 +256,8 @@ pub fn run() {
             prepare_cleanup_execution,
             execute_cleanup,
             restore_quarantine_entry,
+            restore_quarantine_batch,
+            update_quarantine_policy,
             start_space_scan,
             get_space_scan,
             cancel_space_scan,

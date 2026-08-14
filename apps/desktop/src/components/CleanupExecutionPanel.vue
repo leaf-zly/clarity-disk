@@ -1,24 +1,36 @@
 <script setup lang="ts">
-import { computed, shallowRef } from "vue";
+import { computed, shallowRef, watch } from "vue";
 import type { DeepReadonly } from "vue";
 import {
   ArchiveRestore,
   CheckCircle2,
   KeyRound,
   RotateCcw,
+  Save,
   ShieldAlert,
+  Trash2,
 } from "@lucide/vue";
 
 import type { CleanupPlan } from "@/types/dashboard";
 import type {
   CleanupExecutionChallenge,
+  CleanupExecutionMode,
   CleanupExecutionReport,
   QuarantineExecutionIndex,
   QuarantineEntryStatus,
+  QuarantinePolicy,
 } from "@/types/cleanup-execution";
 import { formatBytes } from "@/utils/format-bytes";
 
-/** Restricted execution and restore state rendered below the cleanup preview. */
+const GIB = 1024 ** 3;
+const QUARANTINE_RULES = new Set([
+  "user-temp.v1",
+  "browser-cache.v1",
+  "thumbnail-cache.v1",
+  "build-cache.v1",
+]);
+
+/** Restricted execution, policy, and restore state rendered below cleanup preview. */
 interface Props {
   plan: DeepReadonly<CleanupPlan> | undefined;
   challenge: DeepReadonly<CleanupExecutionChallenge> | undefined;
@@ -28,22 +40,36 @@ interface Props {
   isPreparing: boolean;
   isExecuting: boolean;
   restoringEntryId: string | undefined;
+  isRestoringBatch: boolean;
+  isUpdatingPolicy: boolean;
 }
 
-/** Explicit confirmation and backend-owned restore actions emitted by the panel. */
+/** Mode-bound execution, backend-ID restore, and fixed-tier policy actions. */
 interface Emits {
-  "prepare-execution": [];
+  "prepare-execution": [mode: CleanupExecutionMode];
   execute: [confirmationPhrase: string];
   restore: [entryId: string];
+  "restore-batch": [entryIds: string[]];
+  "update-policy": [policy: QuarantinePolicy];
 }
 
 const props = defineProps<Props>();
 const emit = defineEmits<Emits>();
 const confirmation = shallowRef("");
-const executableCount = computed(
+const selectedEntryIds = shallowRef<string[]>([]);
+const retentionDays = shallowRef<7 | 15 | 30>(30);
+const maxGiB = shallowRef<1 | 5 | 10 | 20>(10);
+const quarantineCount = computed(
+  () =>
+    props.plan?.candidates.filter((candidate) =>
+      QUARANTINE_RULES.has(candidate.ruleId),
+    ).length ?? 0,
+);
+
+const recycleBinCount = computed(
   () =>
     props.plan?.candidates.filter(
-      (candidate) => candidate.ruleId === "user-temp.v1",
+      (candidate) => candidate.ruleId === "recycle-bin.v1",
     ).length ?? 0,
 );
 const canExecute = computed(
@@ -52,25 +78,78 @@ const canExecute = computed(
     confirmation.value === props.challenge?.confirmationPhrase &&
     !props.isExecuting,
 );
-const stagedEntries = computed(
+const managedEntries = computed(
   () =>
     props.quarantine?.entries.filter(
       (entry) => entry.status !== "previewOnly",
     ) ?? [],
 );
+const restorableEntries = computed(() =>
+  managedEntries.value.filter((entry) =>
+    ["staged", "expired", "restoreConflict", "copyVerified"].includes(
+      entry.status,
+    ),
+  ),
+);
+const capacityPercent = computed(() => {
+  if (!props.quarantine?.policy.maxBytes) return 0;
+  return Math.min(
+    100,
+    (props.quarantine.totalBytes / props.quarantine.policy.maxBytes) * 100,
+  );
+});
 
+watch(
+  () => props.quarantine?.policy,
+  (policy) => {
+    if (!policy) return;
+    retentionDays.value = policy.retentionDays;
+    maxGiB.value = (policy.maxBytes / GIB) as 1 | 5 | 10 | 20;
+  },
+  { immediate: true },
+);
+
+/** Returns a concise localized label for durable transaction state. */
 function statusLabel(status: QuarantineEntryStatus): string {
-  if (status === "staged") return "已隔离";
-  if (status === "restored") return "已恢复";
-  if (status === "restoreConflict") return "恢复冲突";
-  if (status === "staging") return "恢复记录处理中";
-  return "仅预演";
+  const labels: Record<QuarantineEntryStatus, string> = {
+    previewOnly: "仅预演",
+    staging: "准备隔离",
+    copying: "跨卷复制中",
+    copyVerified: "副本待复核",
+    staged: "已隔离",
+    restoring: "恢复中",
+    restored: "已恢复",
+    restoreConflict: "恢复冲突",
+    expired: "已到期",
+  };
+  return labels[status];
+}
+
+/** Toggles one backend entry identity for bounded batch restore. */
+function toggleEntry(entryId: string, selected: boolean): void {
+  const ids = new Set(selectedEntryIds.value);
+  if (selected) ids.add(entryId);
+  else ids.delete(entryId);
+  selectedEntryIds.value = [...ids];
 }
 
 function submitExecution(): void {
   if (!canExecute.value) return;
   emit("execute", confirmation.value);
   confirmation.value = "";
+}
+
+function submitBatchRestore(): void {
+  if (!selectedEntryIds.value.length) return;
+  emit("restore-batch", [...selectedEntryIds.value]);
+  selectedEntryIds.value = [];
+}
+
+function submitPolicy(): void {
+  emit("update-policy", {
+    retentionDays: retentionDays.value,
+    maxBytes: maxGiB.value * GIB,
+  });
 }
 </script>
 
@@ -81,68 +160,153 @@ function submitExecution(): void {
         <ArchiveRestore :size="20" aria-hidden="true" />
       </div>
       <div>
-        <span>计划三 · 受限写入</span>
-        <h2 id="execution-title">隔离执行与恢复</h2>
-        <p>仅支持用户临时文件 · 不删除 · 不提权 · 不调用 shell</p>
+        <span>计划四与五 · 安全执行中心</span>
+        <h2 id="execution-title">隔离策略、恢复与系统适配器</h2>
+        <p>
+          四类用户缓存可恢复隔离 · 回收站独立永久确认 · Windows 更新保持只读
+        </p>
       </div>
+    </header>
+
+    <div class="mode-actions">
       <button
         class="verify-button"
         type="button"
         :disabled="
-          !plan || !executableCount || isPreparing || Boolean(challenge)
+          !plan || !quarantineCount || isPreparing || Boolean(challenge)
         "
-        @click="emit('prepare-execution')"
+        @click="emit('prepare-execution', 'quarantine')"
       >
-        <KeyRound :size="16" aria-hidden="true" />
-        {{ isPreparing ? "正在重新校验" : "获取一次性确认" }}
+        <KeyRound :size="16" aria-hidden="true" />{{
+          isPreparing ? "正在校验" : "隔离 " + quarantineCount + " 条缓存规则"
+        }}
       </button>
-    </header>
+      <button
+        class="danger-button"
+        type="button"
+        :disabled="
+          !plan || !recycleBinCount || isPreparing || Boolean(challenge)
+        "
+        @click="emit('prepare-execution', 'windowsRecycleBin')"
+      >
+        <Trash2 :size="16" aria-hidden="true" />永久清空回收站
+      </button>
+      <span class="readonly-note"
+        >Windows Update：只读，等待独立管理员服务</span
+      >
+    </div>
 
     <div v-if="error" class="execution-error" role="alert">{{ error }}</div>
 
     <div
       v-if="challenge"
       class="confirmation-box"
+      :data-danger="challenge.mode === 'windowsRecycleBin'"
       role="group"
-      aria-labelledby="confirmation-title"
     >
       <ShieldAlert :size="22" aria-hidden="true" />
       <div>
-        <strong id="confirmation-title">最后确认</strong>
-        <p>Rust 已完成一次新扫描。令牌两分钟内有效且只能使用一次。</p>
-        <label>
-          <span>请输入“{{ challenge.confirmationPhrase }}”</span>
-          <input
+        <strong>{{
+          challenge.mode === "quarantine"
+            ? "确认可恢复隔离"
+            : "确认不可恢复操作"
+        }}</strong>
+        <p>Rust 已重新扫描并绑定执行模式；令牌两分钟内有效且只能使用一次。</p>
+        <label
+          ><span>请输入“{{ challenge.confirmationPhrase }}”</span
+          ><input
             v-model="confirmation"
-            type="text"
             autocomplete="off"
             :placeholder="challenge.confirmationPhrase"
-          />
-        </label>
+        /></label>
       </div>
       <button type="button" :disabled="!canExecute" @click="submitExecution">
-        {{ isExecuting ? "正在移入隔离区" : "确认并执行隔离" }}
+        {{ isExecuting ? "正在执行" : "确认执行" }}
       </button>
     </div>
 
     <div v-if="report" class="report-strip" role="status">
       <CheckCircle2 :size="18" aria-hidden="true" />
       <div>
-        <strong>本次隔离 {{ formatBytes(report.stagedBytes) }}</strong
-        ><span>{{ report.results.length }} 条候选规则已完成，令牌已消费</span>
+        <strong>{{
+          report.mode === "quarantine"
+            ? "本次隔离 " + formatBytes(report.stagedBytes)
+            : "已处理约 " + formatBytes(report.estimatedProcessedBytes)
+        }}</strong
+        ><span>{{ report.results.length }} 条规则完成，一次性令牌已消费</span>
       </div>
       <code>authorized = {{ report.executionAuthorized }}</code>
+    </div>
+
+    <div class="policy-panel">
+      <div class="policy-copy">
+        <strong>隔离区策略</strong><span>到期只标记，不自动永久删除</span>
+      </div>
+      <label
+        >保留期<select v-model.number="retentionDays">
+          <option :value="7">7 天</option>
+          <option :value="15">15 天</option>
+          <option :value="30">30 天</option>
+        </select></label
+      >
+      <label
+        >容量上限<select v-model.number="maxGiB">
+          <option :value="1">1 GiB</option>
+          <option :value="5">5 GiB</option>
+          <option :value="10">10 GiB</option>
+          <option :value="20">20 GiB</option>
+        </select></label
+      >
+      <button type="button" :disabled="isUpdatingPolicy" @click="submitPolicy">
+        <Save :size="15" aria-hidden="true" />{{
+          isUpdatingPolicy ? "保存中" : "保存策略"
+        }}
+      </button>
+    </div>
+    <div class="capacity" aria-label="隔离区容量">
+      <div>
+        <span>已用 {{ formatBytes(quarantine?.totalBytes ?? 0) }}</span
+        ><span
+          >上限 {{ formatBytes(quarantine?.policy.maxBytes ?? 10 * GIB) }}</span
+        >
+      </div>
+      <progress :value="capacityPercent" max="100" />
     </div>
 
     <div class="quarantine-heading">
       <div>
         <strong>恢复中心</strong
-        ><span>后端索引 {{ stagedEntries.length }} 项</span>
+        ><span>{{ managedEntries.length }} 个后端索引项目</span>
       </div>
-      <span>恢复不会覆盖原位置已有内容</span>
+      <button
+        type="button"
+        :disabled="!selectedEntryIds.length || isRestoringBatch"
+        @click="submitBatchRestore"
+      >
+        <RotateCcw :size="15" aria-hidden="true" />{{
+          isRestoringBatch
+            ? "批量恢复中"
+            : "恢复已选 " + selectedEntryIds.length + " 项"
+        }}
+      </button>
     </div>
-    <div v-if="stagedEntries.length" class="quarantine-list">
-      <article v-for="entry in stagedEntries" :key="entry.entryId">
+    <div v-if="managedEntries.length" class="quarantine-list">
+      <article v-for="entry in managedEntries" :key="entry.entryId">
+        <input
+          class="entry-check"
+          type="checkbox"
+          :aria-label="'选择 ' + entry.entryId"
+          :disabled="
+            !restorableEntries.some((item) => item.entryId === entry.entryId)
+          "
+          :checked="selectedEntryIds.includes(entry.entryId)"
+          @change="
+            toggleEntry(
+              entry.entryId,
+              ($event.target as HTMLInputElement).checked,
+            )
+          "
+        />
         <div class="entry-status" :data-status="entry.status">
           {{ statusLabel(entry.status) }}
         </div>
@@ -154,18 +318,24 @@ function submitExecution(): void {
         <button
           type="button"
           :disabled="
-            !['staged', 'restoreConflict'].includes(entry.status) ||
+            !restorableEntries.some((item) => item.entryId === entry.entryId) ||
             restoringEntryId === entry.entryId
           "
           @click="emit('restore', entry.entryId)"
         >
-          <RotateCcw :size="15" aria-hidden="true" />
-          {{ restoringEntryId === entry.entryId ? "恢复中" : "恢复" }}
+          <RotateCcw :size="15" aria-hidden="true" />{{
+            restoringEntryId === entry.entryId ? "恢复中" : "恢复"
+          }}
         </button>
       </article>
     </div>
     <div v-else class="execution-empty">
       尚无真实隔离项目。预演索引不会显示为已移动。
+    </div>
+    <div class="permanent-delete-lock">
+      <ShieldAlert :size="15" aria-hidden="true" /><span
+        >隔离区永久删除功能尚未开放，需完成单独安全评审。</span
+      >
     </div>
   </section>
 </template>
@@ -181,13 +351,20 @@ function submitExecution(): void {
 }
 .execution-heading,
 .execution-heading > *,
+.mode-actions,
 .confirmation-box,
 .report-strip,
+.policy-panel,
+.capacity > div,
 .quarantine-heading,
 .quarantine-heading > div,
 .quarantine-list article,
 .verify-button,
-.quarantine-list button {
+.danger-button,
+.policy-panel button,
+.quarantine-heading button,
+.quarantine-list button,
+.permanent-delete-lock {
   display: flex;
   align-items: center;
 }
@@ -222,18 +399,37 @@ function submitExecution(): void {
   background: color-mix(in srgb, #ff9f0a 13%, var(--color-surface));
 }
 button,
-input {
+input,
+select {
   font: inherit;
 }
-.verify-button {
+.mode-actions {
+  gap: 8px;
+  margin-top: 17px;
+  flex-wrap: wrap;
+}
+.verify-button,
+.danger-button,
+.policy-panel button,
+.quarantine-heading button {
   gap: 6px;
   min-height: 36px;
   padding: 0 12px;
   border: 1px solid var(--color-border);
   border-radius: 10px;
-  color: #b86a00;
   background: var(--color-surface-muted);
   cursor: pointer;
+}
+.verify-button {
+  color: #b86a00;
+}
+.danger-button {
+  color: #c52b22;
+}
+.readonly-note {
+  margin-left: auto;
+  color: var(--color-text-secondary);
+  font-size: 0.68rem;
 }
 button:disabled {
   cursor: not-allowed;
@@ -256,6 +452,11 @@ button:disabled {
   border-radius: 14px;
   color: #b86a00;
   background: color-mix(in srgb, #ff9f0a 7%, var(--color-surface));
+}
+.confirmation-box[data-danger="true"] {
+  color: #c52b22;
+  border-color: color-mix(in srgb, #ff453a 35%, var(--color-border));
+  background: color-mix(in srgb, #ff453a 7%, var(--color-surface));
 }
 .confirmation-box > div {
   flex: 1;
@@ -287,11 +488,7 @@ button:disabled {
   background: var(--color-surface);
   outline: none;
 }
-.confirmation-box input:focus {
-  border-color: var(--color-blue);
-  box-shadow: 0 0 0 3px var(--color-blue-soft);
-}
-.confirmation-box button {
+.confirmation-box > button {
   min-height: 36px;
   padding: 0 13px;
   border: 0;
@@ -299,6 +496,9 @@ button:disabled {
   color: white;
   background: #d87900;
   cursor: pointer;
+}
+.confirmation-box[data-danger="true"] > button {
+  background: #c52b22;
 }
 .report-strip {
   gap: 9px;
@@ -323,11 +523,58 @@ button:disabled {
   font-family: inherit;
   font-size: 0.66rem;
 }
+.policy-panel {
+  gap: 12px;
+  margin-top: 17px;
+  padding-top: 16px;
+  border-top: 1px solid var(--color-border);
+  flex-wrap: wrap;
+}
+.policy-copy {
+  display: grid;
+  gap: 2px;
+  margin-right: auto;
+}
+.policy-copy strong {
+  font-size: 0.8rem;
+}
+.policy-copy span,
+.policy-panel label {
+  color: var(--color-text-secondary);
+  font-size: 0.67rem;
+}
+.policy-panel label {
+  display: grid;
+  gap: 4px;
+}
+.policy-panel select {
+  min-height: 34px;
+  padding: 0 28px 0 9px;
+  border: 1px solid var(--color-border);
+  border-radius: 9px;
+  color: var(--color-text);
+  background: var(--color-surface-muted);
+}
+.policy-panel button {
+  color: var(--color-blue);
+}
+.capacity {
+  margin-top: 10px;
+}
+.capacity > div {
+  justify-content: space-between;
+  color: var(--color-text-secondary);
+  font-size: 0.66rem;
+}
+.capacity progress {
+  width: 100%;
+  height: 7px;
+  margin-top: 5px;
+  accent-color: var(--color-blue);
+}
 .quarantine-heading {
   justify-content: space-between;
   margin-top: 17px;
-  padding-top: 15px;
-  border-top: 1px solid var(--color-border);
 }
 .quarantine-heading > div {
   gap: 8px;
@@ -338,6 +585,9 @@ button:disabled {
 .quarantine-heading span {
   color: var(--color-text-secondary);
   font-size: 0.67rem;
+}
+.quarantine-heading button {
+  color: var(--color-blue);
 }
 .quarantine-list {
   display: grid;
@@ -350,8 +600,11 @@ button:disabled {
   border: 1px solid var(--color-border);
   border-radius: 11px;
 }
+.entry-check {
+  accent-color: var(--color-blue);
+}
 .entry-status {
-  min-width: 56px;
+  min-width: 66px;
   padding: 4px 7px;
   border-radius: 999px;
   color: var(--color-blue);
@@ -359,13 +612,15 @@ button:disabled {
   font-size: 0.64rem;
   text-align: center;
 }
+.entry-status[data-status="expired"],
+.entry-status[data-status="restoreConflict"],
+.entry-status[data-status="copyVerified"] {
+  color: #c96900;
+  background: color-mix(in srgb, #ff9f0a 11%, var(--color-surface));
+}
 .entry-status[data-status="restored"] {
   color: var(--color-green);
   background: color-mix(in srgb, var(--color-green) 10%, var(--color-surface));
-}
-.entry-status[data-status="restoreConflict"] {
-  color: #c96900;
-  background: color-mix(in srgb, #ff9f0a 11%, var(--color-surface));
 }
 .entry-copy {
   min-width: 0;
@@ -373,19 +628,19 @@ button:disabled {
   gap: 2px;
   flex: 1;
 }
-.entry-copy strong {
+.entry-copy strong,
+.entry-copy code {
   overflow: hidden;
-  font-size: 0.75rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.entry-copy strong {
+  font-size: 0.75rem;
+}
 .entry-copy code {
-  overflow: hidden;
   color: var(--color-text-secondary);
   font-family: inherit;
   font-size: 0.64rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .quarantine-list > article > strong {
   font-size: 0.72rem;
@@ -401,33 +656,44 @@ button:disabled {
   cursor: pointer;
   font-size: 0.68rem;
 }
-.execution-empty {
+.execution-empty,
+.permanent-delete-lock {
   margin-top: 10px;
-  padding: 16px;
+  padding: 13px;
   border-radius: 11px;
   color: var(--color-text-secondary);
   background: var(--color-surface-muted);
-  font-size: 0.72rem;
+  font-size: 0.7rem;
+}
+.execution-empty {
   text-align: center;
 }
+.permanent-delete-lock {
+  gap: 7px;
+  justify-content: center;
+}
 @media (max-width: 700px) {
-  .execution-heading {
-    flex-wrap: wrap;
-  }
-  .verify-button {
-    margin-left: 49px;
-  }
+  .execution-heading,
   .confirmation-box {
     flex-wrap: wrap;
   }
-  .confirmation-box button {
+  .confirmation-box > button {
     width: 100%;
   }
-  .quarantine-heading > span {
-    display: none;
+  .readonly-note {
+    width: 100%;
+    margin-left: 0;
   }
-  .entry-copy code {
-    max-width: 160px;
+  .quarantine-list article {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .entry-copy {
+    width: calc(100% - 100px);
+    flex: none;
+  }
+  .policy-copy {
+    width: 100%;
   }
 }
 </style>

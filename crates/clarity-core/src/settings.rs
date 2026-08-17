@@ -8,6 +8,10 @@ const MAX_IGNORED_ROOTS: usize = 32;
 const MIN_IDLE_SECONDS: u32 = 5 * 60;
 
 /// Persisted, privacy-first application preferences.
+// These switches represent independent user consent and lifecycle preferences;
+// collapsing them into a state machine would create invalid coupling in the
+// serialized settings contract.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
@@ -172,6 +176,7 @@ pub struct AutomaticMaintenanceDecision {
 
 impl AutomaticMaintenanceDecision {
     /// Evaluates cadence and machine protections without authorizing deletion.
+    #[must_use]
     pub fn evaluate(
         schedule: AutomaticMaintenanceSchedule,
         context: AutomaticMaintenanceContext,

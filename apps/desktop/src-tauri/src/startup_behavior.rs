@@ -93,10 +93,7 @@ fn apply_windows_launch_at_login(enabled: bool) -> Result<(), String> {
         // Removing an already-absent value is the desired disabled state.
         ERROR_FILE_NOT_FOUND if !enabled => {}
         error_code => {
-            return Err(registry_error(
-                "Windows 拒绝更新登录启动设置",
-                error_code,
-            ));
+            return Err(registry_error("Windows 拒绝更新登录启动设置", error_code));
         }
     }
     if close_status != ERROR_SUCCESS {

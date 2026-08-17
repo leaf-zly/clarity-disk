@@ -19,6 +19,17 @@
 7. 创建 Draft Release，上传安装包、便携版、SHA-256 和 GitHub 来源证明。
 8. 人工核对变更说明、SmartScreen/杀毒软件结果和回滚版本后发布。
 
+## 无签名测试包
+
+当代码签名证书尚未配置但需要短期功能验收时，可手动运行
+`Windows unsigned preview package`。该工作流仅在 GitHub 托管 Windows Runner
+构建 NSIS，将安装包、SHA-256 和明确的未签名说明保存为保留 7 天的 Artifact；
+它不会创建 Tag、GitHub Release 或可长期分发的资产。
+
+测试工作流与正式发布严格分离，不会放宽正式 Release 的证书要求，也不会移除
+备份验证、一次性确认或分区写入双门禁。由于 Artifact 没有 Authenticode 发布者，
+Windows SmartScreen 或杀毒软件仍可能显示未签名警告。
+
 ## 预期耗时
 
 - 前端质量检查：缓存命中后约 1–3 分钟。

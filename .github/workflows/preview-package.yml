@@ -1,0 +1,110 @@
+name: Windows unsigned preview package
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-unsigned-preview-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package-windows:
+    name: Build unsigned Windows preview
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      CARGO_INCREMENTAL: 0
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v5
+        with:
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.97.0
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache Rust preview build
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: windows-preview
+          cache-targets: true
+          cache-on-failure: true
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --prefer-offline
+
+      - name: Read application version
+        shell: pwsh
+        run: |
+          $config = Get-Content -LiteralPath 'apps\desktop\src-tauri\tauri.conf.json' -Raw | ConvertFrom-Json
+          if ($config.version -notmatch '^\d+\.\d+\.\d+$') {
+            throw "Application version is not semantic: $($config.version)"
+          }
+          "APP_VERSION=$($config.version)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Build privileged broker
+        shell: pwsh
+        run: |
+          cargo build --release --locked -p clarity-privileged-service --features partition-writes
+          $binaryRoot = 'apps\desktop\src-tauri\binaries'
+          New-Item -ItemType Directory -Path $binaryRoot -Force | Out-Null
+          Copy-Item -LiteralPath 'target\release\clarity-privileged-service.exe' -Destination "$binaryRoot\clarity-privileged-service-x86_64-pc-windows-msvc.exe"
+
+      - name: Build unsigned NSIS installer
+        run: pnpm --filter @clarity-disk/desktop tauri build --bundles nsis --config src-tauri/tauri.release.conf.json
+
+      - name: Stage preview artifact
+        shell: pwsh
+        run: |
+          $artifactRoot = 'target\preview-artifact'
+          New-Item -ItemType Directory -Path $artifactRoot -Force | Out-Null
+          $installers = @(Get-ChildItem -Path 'target\release\bundle\nsis\*.exe')
+          if ($installers.Count -ne 1) {
+            throw "Expected exactly one NSIS installer, found $($installers.Count)."
+          }
+          Copy-Item -LiteralPath $installers[0].FullName -Destination $artifactRoot
+          $installedName = $installers[0].Name
+          $hash = Get-FileHash -LiteralPath $installers[0].FullName -Algorithm SHA256
+          "$($hash.Hash.ToLowerInvariant())  $installedName" | Set-Content -LiteralPath "$artifactRoot\SHA256SUMS.txt" -Encoding utf8
+          @(
+            'UNSIGNED TEST BUILD — NOT FOR DISTRIBUTION',
+            'This package was built on a GitHub-hosted Windows runner without an Authenticode certificate.',
+            'Windows SmartScreen or antivirus software may display an unsigned-publisher warning.',
+            "Source commit: $env:GITHUB_SHA"
+          ) | Set-Content -LiteralPath "$artifactRoot\UNSIGNED-PREVIEW.txt" -Encoding utf8
+
+      - name: Upload unsigned preview
+        uses: actions/upload-artifact@v5
+        with:
+          name: clarity-disk-v${{ env.APP_VERSION }}-windows-x64-unsigned-preview
+          path: target/preview-artifact/*
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+      - name: Publish preview warning
+        shell: pwsh
+        run: |
+          @'
+          ## Unsigned Windows preview
+
+          This artifact is for short-lived functional testing only. It is not a formal release,
+          has no Authenticode publisher, and may trigger SmartScreen or antivirus warnings.
+          '@ | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY

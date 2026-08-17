@@ -3,7 +3,7 @@ import type { PartitionSafetyAssessment } from "@/types/partition-safety";
 import type { MergePreviewRequest } from "@/types/partition";
 
 /**
- * Creates browser-only plan-seven evidence without reading or writing a disk.
+ * Creates browser-only safety evidence without reading or writing a disk.
  * Backup remains blocked because a UI fixture cannot prove recoverability.
  */
 export function createPartitionSafetyFixture(
@@ -66,7 +66,7 @@ export function createPartitionSafetyFixture(
       {
         code: "writeCapabilityDisabled",
         passed: true,
-        message: "计划七没有注册分区写入能力或执行令牌",
+        message: "当前评估未注册分区写入能力或执行令牌",
       },
     ],
     blockers: [
@@ -81,6 +81,6 @@ export function createPartitionSafetyFixture(
     executionAuthorized: false,
     writeCapabilityPresent: false,
     disclaimer:
-      "这是计划七安全基础评估，不是执行批准；当前版本没有任何分区写入命令。",
+      "这是分区安全评估，不是执行批准；只有重新发现状态且全部门禁通过后，才可请求一次性管理员执行。",
   };
 }

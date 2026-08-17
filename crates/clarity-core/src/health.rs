@@ -17,7 +17,7 @@ pub struct DiskHealthSnapshot {
     pub summary: DiskHealthSummary,
     /// Non-fatal provider limitations that remain visible to the user.
     pub discovery_warnings: Vec<String>,
-    /// Always true because F11 has no repair or write command surface.
+    /// Always true because health discovery has no repair or write command surface.
     pub read_only: bool,
 }
 
@@ -173,7 +173,7 @@ pub struct PhysicalDiskHealth {
     pub status: DiskHealthStatus,
     /// Evidence-bearing warnings, critical findings, or unknown states.
     pub signals: Vec<DiskHealthSignal>,
-    /// Always true in F11 because physical-disk writes are not implemented.
+    /// Always true because the health feature never performs physical-disk writes.
     pub partition_writes_blocked: bool,
 }
 

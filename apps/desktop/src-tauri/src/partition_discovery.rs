@@ -1,9 +1,8 @@
 //! Windows read-only partition topology discovery.
 //!
-//! The adapter executes one compile-time `PowerShell`/CIM query because the
-//! Windows Storage Management API is PowerShell's supported compatibility
-//! surface across the Windows versions targeted by this desktop application.
-//! No caller input, path, command text, or partition operation is interpolated.
+//! The adapter prefers an input-free CIM query and retains an immutable
+//! Storage-cmdlet fallback for older Windows environments. No caller input,
+//! path, command text, or partition operation is interpolated.
 
 use std::{
     path::PathBuf,
@@ -21,9 +20,9 @@ const EFI_GPT_TYPE: &str = "{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}";
 const MSR_GPT_TYPE: &str = "{e3c9e316-0b5c-4db8-817d-f92df00215ae}";
 const RECOVERY_GPT_TYPE: &str = "{de94bba4-06d1-4d40-a16a-bfd50179d6ac}";
 
-// This script is an immutable application resource. Keeping it input-free is
-// the security boundary that prevents this adapter becoming an arbitrary shell.
-const DISCOVERY_SCRIPT: &str = r"
+// This immutable script is the compatibility fallback for environments where
+// the primary CIM provider is unavailable. It accepts no caller-controlled data.
+const LEGACY_DISCOVERY_SCRIPT: &str = r"
 $ErrorActionPreference = 'Stop'
 $utf8 = [System.Text.UTF8Encoding]::new($false)
 [Console]::OutputEncoding = $utf8
@@ -190,6 +189,8 @@ $disks = @(
 [ordered]@{ disks = $disks; warnings = @($warnings) } | ConvertTo-Json -Depth 8 -Compress
 ";
 
+const DISCOVERY_SCRIPT: &str = include_str!("scripts/partition_discovery.ps1");
+
 /// Discovers a read-only physical-disk and partition topology on Windows.
 ///
 /// The child process receives only the compile-time script above. This
@@ -214,21 +215,32 @@ pub fn discover_partition_topology() -> Result<PartitionTopology, PartitionDisco
 
 #[cfg(windows)]
 fn discover_windows_partition_topology() -> Result<PartitionTopology, PartitionDiscoveryError> {
-    let output = Command::new(powershell_path()?)
-        .args([
-            "-NoLogo",
-            "-NoProfile",
-            "-NonInteractive",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            DISCOVERY_SCRIPT,
-        ])
-        .stdin(Stdio::null())
-        .stderr(Stdio::piped())
-        .stdout(Stdio::piped())
-        .output()
-        .map_err(PartitionDiscoveryError::Launch)?;
+    let powershell = powershell_path()?;
+    let run_provider = |script: &'static str| {
+        Command::new(&powershell)
+            .args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                script,
+            ])
+            .stdin(Stdio::null())
+            .stderr(Stdio::piped())
+            .stdout(Stdio::piped())
+            .output()
+            .map_err(PartitionDiscoveryError::Launch)
+    };
+    let primary_output = run_provider(DISCOVERY_SCRIPT)?;
+    // Older Windows editions may not expose the modern Storage CIM namespace.
+    // Fall back to the compatible Storage cmdlets without weakening validation.
+    let output = if primary_output.status.success() {
+        primary_output
+    } else {
+        run_provider(LEGACY_DISCOVERY_SCRIPT)?
+    };
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();

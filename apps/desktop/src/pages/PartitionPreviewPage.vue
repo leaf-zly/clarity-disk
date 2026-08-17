@@ -244,16 +244,28 @@ onMounted(refreshTopology);
     </div>
 
     <template v-else-if="topology && selectedDisk">
-      <div v-if="topology.discoveryWarnings.length" class="warning-list">
-        <div
-          v-for="warning in topology.discoveryWarnings"
-          :key="warning"
-          class="state-card warning-card"
-          role="status"
-        >
-          <AlertTriangle :size="18" aria-hidden="true" />{{ warning }}
-        </div>
-      </div>
+      <details
+        v-if="topology.discoveryWarnings.length"
+        class="state-card warning-card provider-limitations"
+      >
+        <summary>
+          <AlertTriangle :size="18" aria-hidden="true" />
+          <span>
+            <strong>基础分区信息已读取</strong>
+            <small
+              >{{
+                topology.discoveryWarnings.length
+              }}
+              项高级安全信号受权限或硬件能力限制</small
+            >
+          </span>
+        </summary>
+        <ul>
+          <li v-for="warning in topology.discoveryWarnings" :key="warning">
+            {{ warning }}
+          </li>
+        </ul>
+      </details>
 
       <section class="disk-selector" aria-label="物理磁盘">
         <button
@@ -650,6 +662,41 @@ onMounted(refreshTopology);
 .error-card,
 .warning-card {
   color: var(--color-orange);
+}
+
+.provider-limitations {
+  display: block;
+}
+
+.provider-limitations summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.provider-limitations summary::-webkit-details-marker {
+  display: none;
+}
+
+.provider-limitations summary span {
+  display: grid;
+  gap: 3px;
+}
+
+.provider-limitations summary small {
+  color: var(--color-text-secondary);
+}
+
+.provider-limitations ul {
+  margin: 14px 0 0 28px;
+  padding-left: 16px;
+  color: var(--color-text-secondary);
+}
+
+.provider-limitations li + li {
+  margin-top: 8px;
 }
 
 .disk-selector {

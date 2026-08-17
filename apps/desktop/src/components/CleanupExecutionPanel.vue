@@ -160,7 +160,7 @@ function submitPolicy(): void {
         <ArchiveRestore :size="20" aria-hidden="true" />
       </div>
       <div>
-        <span>计划四与五 · 安全执行中心</span>
+        <span>安全执行中心</span>
         <h2 id="execution-title">隔离策略、恢复与系统适配器</h2>
         <p>
           四类用户缓存可恢复隔离 · 回收站独立永久确认 · Windows 更新保持只读

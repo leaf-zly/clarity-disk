@@ -242,7 +242,7 @@ function partitionName(partitionId: string | undefined): string {
     <header class="page-header">
       <div>
         <span class="eyebrow">
-          <ShieldCheck :size="14" aria-hidden="true" />计划七
+          <ShieldCheck :size="14" aria-hidden="true" />安全评估
         </span>
         <h1 id="safety-page-title">分区安全基础</h1>
         <p>生成不可变计划，并在全部门禁通过后交给独立管理员代理执行。</p>
@@ -520,7 +520,7 @@ function partitionName(partitionId: string | undefined): string {
         <section class="surface execution-card">
           <div class="section-heading">
             <div>
-              <span class="section-kicker">计划九 · 真实执行</span>
+              <span class="section-kicker">受控执行</span>
               <h2>重新发现并检查全部执行门禁</h2>
             </div>
             <UnlockKeyhole :size="20" aria-hidden="true" />
@@ -535,9 +535,7 @@ function partitionName(partitionId: string | undefined): string {
             @click="prepareRealExecution"
           >
             <LoaderCircle v-if="isPreparingExecution" class="spin" :size="16" />
-            {{
-              isPreparingExecution ? "正在检查执行门禁" : "检查计划九执行门禁"
-            }}
+            {{ isPreparingExecution ? "正在检查执行门禁" : "检查执行门禁" }}
           </button>
           <p v-if="executionMessage" class="inline-error" role="status">
             {{ executionMessage }}

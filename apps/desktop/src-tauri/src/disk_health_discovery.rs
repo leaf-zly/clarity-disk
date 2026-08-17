@@ -16,9 +16,9 @@ use clarity_core::{
 };
 use serde::Deserialize;
 
-// This immutable, input-free script is the adapter's shell-injection boundary.
-// It performs only Storage-module discovery and never invokes a write command.
-const HEALTH_DISCOVERY_SCRIPT: &str = r"
+// This immutable, input-free script is the compatibility fallback used only
+// when the primary CIM provider fails. It never invokes a write command.
+const LEGACY_HEALTH_DISCOVERY_SCRIPT: &str = r"
 $ErrorActionPreference = 'Stop'
 $utf8 = [System.Text.UTF8Encoding]::new($false)
 [Console]::OutputEncoding = $utf8
@@ -165,6 +165,8 @@ $disks = @(
 [ordered]@{ disks = $disks; warnings = @($warnings) } | ConvertTo-Json -Depth 7 -Compress
 ";
 
+const HEALTH_DISCOVERY_SCRIPT: &str = include_str!("scripts/disk_health_discovery.ps1");
+
 /// Discovers and conservatively evaluates physical-disk health on Windows.
 ///
 /// The command accepts no caller input, runs only the fixed read-only script,
@@ -189,21 +191,32 @@ pub fn discover_disk_health() -> Result<DiskHealthSnapshot, DiskHealthDiscoveryE
 
 #[cfg(windows)]
 fn discover_windows_disk_health() -> Result<DiskHealthSnapshot, DiskHealthDiscoveryError> {
-    let output = Command::new(powershell_path()?)
-        .args([
-            "-NoLogo",
-            "-NoProfile",
-            "-NonInteractive",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            HEALTH_DISCOVERY_SCRIPT,
-        ])
-        .stdin(Stdio::null())
-        .stderr(Stdio::piped())
-        .stdout(Stdio::piped())
-        .output()
-        .map_err(DiskHealthDiscoveryError::Launch)?;
+    let powershell = powershell_path()?;
+    let run_provider = |script: &'static str| {
+        Command::new(&powershell)
+            .args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                script,
+            ])
+            .stdin(Stdio::null())
+            .stderr(Stdio::piped())
+            .stdout(Stdio::piped())
+            .output()
+            .map_err(DiskHealthDiscoveryError::Launch)
+    };
+    let primary_output = run_provider(HEALTH_DISCOVERY_SCRIPT)?;
+    // Keep the Storage-module provider for Windows builds that do not expose
+    // the modern Storage CIM classes used by the primary implementation.
+    let output = if primary_output.status.success() {
+        primary_output
+    } else {
+        run_provider(LEGACY_HEALTH_DISCOVERY_SCRIPT)?
+    };
 
     if !output.status.success() {
         return Err(DiskHealthDiscoveryError::ProviderFailed(

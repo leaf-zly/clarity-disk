@@ -84,7 +84,7 @@ export interface PhysicalDiskHealth {
   dataCompleteness: HealthDataCompleteness;
   status: DiskHealthStatus;
   signals: DiskHealthSignal[];
-  /** F11 invariant: the health feature exposes no partition writer. */
+  /** Read-only invariant: the health feature exposes no partition writer. */
   partitionWritesBlocked: true;
 }
 

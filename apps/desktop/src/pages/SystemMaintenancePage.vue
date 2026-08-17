@@ -158,7 +158,7 @@ async function execute(): Promise<void> {
   <section class="maintenance-page" aria-labelledby="maintenance-title">
     <header class="page-header">
       <div>
-        <span class="eyebrow"><ShieldCheck :size="14" />计划八</span>
+        <span class="eyebrow"><ShieldCheck :size="14" />受控维护</span>
         <h1 id="maintenance-title">管理员维护</h1>
         <p>普通界面不提权。只有确认后的枚举操作进入一次性管理员代理。</p>
       </div>
@@ -235,7 +235,7 @@ async function execute(): Promise<void> {
 
     <section class="partition-gate">
       <div>
-        <span class="section-kicker">计划九 · 实验能力</span>
+        <span class="section-kicker">高风险维护能力</span>
         <h2>真实分区合并执行器</h2>
         <p>
           编译门禁、管理员运行时门禁、已验证独立备份与新鲜磁盘证据必须同时通过。

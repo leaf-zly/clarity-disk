@@ -1,31 +1,68 @@
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
   font-family: "Segoe UI Variable", "Microsoft YaHei UI", system-ui, sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
-  --color-canvas: light-dark(#f5f6f8, #17181b);
-  --color-sidebar: light-dark(
-    rgba(236, 238, 242, 0.94),
-    rgba(31, 32, 36, 0.96)
-  );
-  --color-surface: light-dark(#ffffff, #24262a);
-  --color-surface-muted: light-dark(#f8f9fb, #2b2d32);
-  --color-text: light-dark(#1d1d1f, #f5f5f7);
-  --color-text-secondary: light-dark(#6e6e73, #a1a1a6);
-  --color-border: light-dark(rgba(20, 20, 25, 0.08), rgba(255, 255, 255, 0.09));
-  --color-blue: light-dark(#1677ff, #5ba0ff);
-  --color-blue-soft: light-dark(#eaf3ff, rgba(42, 116, 214, 0.18));
-  --color-green: light-dark(#248a3d, #5bcf72);
-  --color-green-soft: light-dark(#edf8f0, rgba(64, 162, 87, 0.17));
-  --color-orange: light-dark(#c65f00, #ffb45c);
-  --color-orange-soft: light-dark(#fff4e7, rgba(198, 95, 0, 0.18));
-  --color-purple: light-dark(#7b4ab5, #b98de9);
-  --shadow-card: light-dark(
-    0 8px 30px rgba(30, 38, 52, 0.06),
-    0 12px 34px rgba(0, 0, 0, 0.2)
-  );
+  --color-canvas: #f5f6f8;
+  --color-sidebar: rgba(236, 238, 242, 0.94);
+  --color-surface: #ffffff;
+  --color-surface-muted: #f8f9fb;
+  --color-text: #1d1d1f;
+  --color-text-secondary: #6e6e73;
+  --color-border: rgba(20, 20, 25, 0.08);
+  --color-blue: #1677ff;
+  --color-blue-soft: #eaf3ff;
+  --color-green: #248a3d;
+  --color-green-soft: #edf8f0;
+  --color-orange: #c65f00;
+  --color-orange-soft: #fff4e7;
+  --color-purple: #7b4ab5;
+  --shadow-card: 0 8px 30px rgba(30, 38, 52, 0.06);
   color: var(--color-text);
   background: var(--color-canvas);
+}
+
+:root[data-theme="system"] {
+  color-scheme: light dark;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-canvas: #17181b;
+  --color-sidebar: rgba(31, 32, 36, 0.96);
+  --color-surface: #24262a;
+  --color-surface-muted: #2b2d32;
+  --color-text: #f5f5f7;
+  --color-text-secondary: #a1a1a6;
+  --color-border: rgba(255, 255, 255, 0.09);
+  --color-blue: #5ba0ff;
+  --color-blue-soft: rgba(42, 116, 214, 0.18);
+  --color-green: #5bcf72;
+  --color-green-soft: rgba(64, 162, 87, 0.17);
+  --color-orange: #ffb45c;
+  --color-orange-soft: rgba(198, 95, 0, 0.18);
+  --color-purple: #b98de9;
+  --shadow-card: 0 12px 34px rgba(0, 0, 0, 0.2);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-theme="system"] {
+    --color-canvas: #17181b;
+    --color-sidebar: rgba(31, 32, 36, 0.96);
+    --color-surface: #24262a;
+    --color-surface-muted: #2b2d32;
+    --color-text: #f5f5f7;
+    --color-text-secondary: #a1a1a6;
+    --color-border: rgba(255, 255, 255, 0.09);
+    --color-blue: #5ba0ff;
+    --color-blue-soft: rgba(42, 116, 214, 0.18);
+    --color-green: #5bcf72;
+    --color-green-soft: rgba(64, 162, 87, 0.17);
+    --color-orange: #ffb45c;
+    --color-orange-soft: rgba(198, 95, 0, 0.18);
+    --color-purple: #b98de9;
+    --shadow-card: 0 12px 34px rgba(0, 0, 0, 0.2);
+  }
 }
 
 * {

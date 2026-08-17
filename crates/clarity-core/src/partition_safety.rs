@@ -175,7 +175,7 @@ impl PartitionSafetyAssessment {
             discovery_warnings: evidence.discovery_warnings,
             execution_authorized: false,
             write_capability_present: false,
-            disclaimer: "这是计划七安全基础评估，不是执行批准；当前版本没有任何分区写入命令。"
+            disclaimer: "这是分区安全评估，不是执行批准；只有重新发现状态且全部门禁通过后，才可请求一次性管理员执行。"
                 .to_owned(),
         })
     }
@@ -287,7 +287,7 @@ fn evaluate_safety_checks(
     checks.push(PartitionSafetyCheck {
         code: PartitionSafetyCheckCode::WriteCapabilityDisabled,
         passed: true,
-        message: "计划七没有注册分区写入能力或执行令牌".to_owned(),
+        message: "当前评估未注册分区写入能力或执行令牌".to_owned(),
     });
     (checks, blockers)
 }

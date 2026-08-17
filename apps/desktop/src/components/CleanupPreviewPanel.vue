@@ -102,9 +102,7 @@ function auditLabel(kind: CleanupAuditEvent["kind"]): string {
         <FolderSearch :size="20" aria-hidden="true" />
       </div>
       <div class="heading-copy">
-        <div class="eyebrow">
-          <span class="status-dot" />计划二 · 安全清理中心
-        </div>
+        <div class="eyebrow"><span class="status-dot" />安全清理中心</div>
         <h2 id="cleanup-preview-title">清理预览</h2>
         <p>{{ preview.scan.message }} · 全程只读，不会删除或移动文件</p>
       </div>
@@ -323,7 +321,7 @@ function auditLabel(kind: CleanupAuditEvent["kind"]): string {
 
     <div class="preview-note">
       <Info :size="16" aria-hidden="true" /><span
-        >计划二只实现发现、计划、审计和隔离区索引。没有删除、移动、提权或系统命令入口。</span
+        >当前预览只负责发现、计划、审计和隔离区索引，不会删除、移动文件或执行系统命令。</span
       >
     </div>
     <div v-if="plan" class="plan-note" role="status">

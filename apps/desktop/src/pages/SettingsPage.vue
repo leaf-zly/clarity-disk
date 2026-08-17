@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, shallowRef } from "vue";
+import {
+  computed,
+  onDeactivated,
+  onMounted,
+  ref,
+  shallowRef,
+  watch,
+} from "vue";
 import {
   Activity,
   Bell,
@@ -13,13 +20,14 @@ import {
 } from "@lucide/vue";
 
 import {
-  checkForUpdates,
   clearCrashDiagnostics,
   getAppSettings,
   getDiagnosticsSnapshot,
   runAutomaticMaintenance,
   updateAppSettings,
 } from "@/services/operations-service";
+import { checkForUpdates } from "@/services/release-service";
+import { applyThemePreference } from "@/services/theme-service";
 import type {
   AppSettings,
   AutomaticMaintenanceRunReport,
@@ -38,6 +46,7 @@ const busy = ref(false);
 const updateBusy = ref(false);
 const message = ref("");
 const errorMessage = ref("");
+const persistedTheme = shallowRef<AppSettings["theme"]>("system");
 
 const performancePassed = computed(
   () =>
@@ -54,10 +63,10 @@ async function load(): Promise<void> {
       getAppSettings(),
       getDiagnosticsSnapshot(),
     ]);
+    persistedTheme.value = nextSettings.theme;
     settings.value = nextSettings;
     diagnostics.value = nextDiagnostics;
     ignoredRootsText.value = nextSettings.ignoredScanRoots.join("\n");
-    applyTheme(nextSettings.theme);
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : String(error);
   } finally {
@@ -80,7 +89,8 @@ async function save(): Promise<void> {
     };
     settings.value = await updateAppSettings(payload);
     ignoredRootsText.value = settings.value.ignoredScanRoots.join("\n");
-    applyTheme(settings.value.theme);
+    persistedTheme.value = settings.value.theme;
+    applyThemePreference(settings.value.theme);
     diagnostics.value = await getDiagnosticsSnapshot();
     message.value = "设置已验证并保存。";
   } catch (error) {
@@ -122,11 +132,6 @@ async function clearDiagnostics(): Promise<void> {
   message.value = "本地崩溃标记已清除。";
 }
 
-function applyTheme(theme: AppSettings["theme"]): void {
-  document.documentElement.style.colorScheme =
-    theme === "system" ? "light dark" : theme;
-}
-
 function settingsSaveError(error: unknown): string {
   const detail = error instanceof Error ? error.message : String(error);
   if (/launch-at-login|登录启动|startup/i.test(detail)) {
@@ -148,6 +153,19 @@ function maintenanceLabel(report: AutomaticMaintenanceRunReport): string {
   };
   return labels[report.decision.reason] ?? "本次维护未运行。";
 }
+
+watch(
+  () => settings.value?.theme,
+  (theme) => {
+    if (theme) applyThemePreference(theme);
+  },
+);
+
+onDeactivated(() => {
+  if (!settings.value || settings.value.theme === persistedTheme.value) return;
+  settings.value.theme = persistedTheme.value;
+  applyThemePreference(persistedTheme.value);
+});
 
 onMounted(() => void load());
 </script>
@@ -335,19 +353,28 @@ onMounted(() => void load());
           </button>
           <div v-if="release" class="release-result">
             <strong>{{
-              release.updateAvailable
-                ? `发现 ${release.latestVersion}`
-                : `已是最新 ${release.currentVersion}`
+              !release.publishedAt
+                ? "尚未发布正式版本"
+                : release.updateAvailable
+                  ? `发现 ${release.latestVersion}`
+                  : `已是最新 ${release.currentVersion}`
             }}</strong>
-            <span :class="{ passed: release.hasChecksums }"
+            <p v-if="!release.publishedAt">
+              当前为功能测试构建；正式发布后才会提供签名安装包和校验文件。
+            </p>
+            <span
+              v-if="release.publishedAt"
+              :class="{ passed: release.hasChecksums }"
               >SHA-256 {{ release.hasChecksums ? "可用" : "缺失" }}</span
             >
-            <span :class="{ passed: release.hasWindowsInstaller }"
+            <span
+              v-if="release.publishedAt"
+              :class="{ passed: release.hasWindowsInstaller }"
               >Windows 安装包
               {{ release.hasWindowsInstaller ? "可用" : "缺失" }}</span
             >
             <a :href="release.releaseUrl" target="_blank" rel="noreferrer"
-              >在 GitHub 查看发布说明</a
+              >在 GitHub 查看发布页面</a
             >
           </div>
         </article>

@@ -1,5 +1,13 @@
 <script setup lang="ts">
-import { computed, onMounted, shallowRef, toRaw, watch } from "vue";
+import {
+  computed,
+  nextTick,
+  onMounted,
+  shallowRef,
+  toRaw,
+  useTemplateRef,
+  watch,
+} from "vue";
 import {
   CalendarClock,
   ChevronRight,
@@ -29,6 +37,23 @@ import type {
   CleanupExecutionMode,
   QuarantinePolicy,
 } from "@/types/cleanup-execution";
+import type { DashboardSection } from "@/types/navigation";
+
+/** Sidebar-selected dashboard subsection displayed by this shared workspace. */
+interface Props {
+  section?: DashboardSection;
+}
+
+/** Navigation intents produced by actions inside the dashboard. */
+interface Emits {
+  navigate: [section: DashboardSection];
+}
+
+const props = withDefaults(defineProps<Props>(), { section: "overview" });
+const emit = defineEmits<Emits>();
+const overviewSection = useTemplateRef<HTMLElement>("overviewSection");
+const cleanupSection = useTemplateRef<HTMLElement>("cleanupSection");
+const spaceSection = useTemplateRef<HTMLElement>("spaceSection");
 
 const snapshot = shallowRef<DashboardSnapshot>();
 const loadError = shallowRef<string>();
@@ -90,6 +115,28 @@ const selectedDisk = computed(() => {
     snapshot.value.disks.find((disk) => disk.id === selectedDiskId.value) ??
     snapshot.value.disk
   );
+});
+const pageCopy = computed(() => {
+  const copy: Record<DashboardSection, { title: string; description: string }> =
+    {
+      overview: {
+        title: "下午好",
+        description: "查看磁盘容量、清理建议和维护状态。",
+      },
+      space: {
+        title: "空间分析",
+        description: "按受限范围执行只读扫描，定位空间占用。",
+      },
+      cleanup: {
+        title: "智能清理",
+        description: "先预览、再确认；所有候选均经过后端安全校验。",
+      },
+      "large-files": {
+        title: "大文件",
+        description: "完成只读空间分析后查看最大的文件与目录。",
+      },
+    };
+  return copy[props.section];
 });
 
 /** Refreshes dashboard discovery while preserving user-readable errors. */
@@ -178,22 +225,44 @@ async function restoreCleanupEntry(entryId: string): Promise<void> {
 }
 
 watch(selectedDiskId, () => void applySelectedVolumeScope());
+watch(
+  () => props.section,
+  () => void focusSection("smooth"),
+  { flush: "post" },
+);
 
-onMounted(async () => {
+onMounted(() => void initializeDashboard());
+
+async function initializeDashboard(): Promise<void> {
   await refreshDashboard();
-  await refreshCleanupPreview();
-  await refreshSpaceScanHistory();
-  await refreshExecutionQuarantine();
-  await applySelectedVolumeScope();
-});
+  await Promise.allSettled([
+    refreshCleanupPreview(),
+    refreshSpaceScanHistory(),
+    refreshExecutionQuarantine(),
+    applySelectedVolumeScope(),
+  ]);
+  await focusSection("auto");
+}
+
+/** Scrolls the shared dashboard to the destination represented by the sidebar. */
+async function focusSection(behavior: ScrollBehavior): Promise<void> {
+  await nextTick();
+  const target =
+    props.section === "overview"
+      ? overviewSection.value
+      : props.section === "cleanup"
+        ? cleanupSection.value
+        : spaceSection.value;
+  target?.scrollIntoView?.({ behavior, block: "start" });
+}
 </script>
 
 <template>
   <section class="dashboard" aria-labelledby="dashboard-title">
     <header class="page-header">
       <div>
-        <h1 id="dashboard-title">下午好</h1>
-        <p>所有磁盘状态良好，C 盘空间已恢复到舒适水平。</p>
+        <h1 id="dashboard-title">{{ pageCopy.title }}</h1>
+        <p>{{ pageCopy.description }}</p>
       </div>
       <button
         class="scan-button"
@@ -218,68 +287,74 @@ onMounted(async () => {
     </div>
 
     <template v-else-if="snapshot">
-      <DiskUsageCard
-        :disk="selectedDisk ?? snapshot.disk"
-        :reclaimable-bytes="snapshot.cleanup.reclaimableBytes"
-        @open-cleanup="() => undefined"
-      />
-      <DiskVolumeList
-        :disks="snapshot.disks"
-        :active-disk-id="selectedDiskId ?? snapshot.disk.id"
-        @select-disk="(disk) => (selectedDiskId = disk.id)"
-      />
+      <div ref="overviewSection" class="dashboard-section">
+        <DiskUsageCard
+          :disk="selectedDisk ?? snapshot.disk"
+          :reclaimable-bytes="snapshot.cleanup.reclaimableBytes"
+          @open-cleanup="emit('navigate', 'cleanup')"
+        />
+        <DiskVolumeList
+          :disks="snapshot.disks"
+          :active-disk-id="selectedDiskId ?? snapshot.disk.id"
+          @select-disk="(disk) => (selectedDiskId = disk.id)"
+        />
+      </div>
 
-      <CleanupPreviewPanel
-        v-if="cleanupPreview"
-        :preview="cleanupPreview"
-        :selected-ids="selectedIds"
-        :selected-bytes="selectedBytes"
-        :highest-risk="highestRisk"
-        :is-loading="isCleanupLoading"
-        :error="cleanupError"
-        :plan="cleanupPlan"
-        :quarantine="quarantine"
-        :audit-events="auditEvents"
-        :is-preparing-plan="isPreparingPlan"
-        :is-preparing-quarantine="isPreparingQuarantine"
-        @request-scan="refreshCleanupPreview"
-        @update-selection="setCleanupSelected"
-        @prepare-plan="preparePlan"
-        @prepare-quarantine="createQuarantineIndex"
-      />
+      <div ref="cleanupSection" class="dashboard-section">
+        <CleanupPreviewPanel
+          v-if="cleanupPreview"
+          :preview="cleanupPreview"
+          :selected-ids="selectedIds"
+          :selected-bytes="selectedBytes"
+          :highest-risk="highestRisk"
+          :is-loading="isCleanupLoading"
+          :error="cleanupError"
+          :plan="cleanupPlan"
+          :quarantine="quarantine"
+          :audit-events="auditEvents"
+          :is-preparing-plan="isPreparingPlan"
+          :is-preparing-quarantine="isPreparingQuarantine"
+          @request-scan="refreshCleanupPreview"
+          @update-selection="setCleanupSelected"
+          @prepare-plan="preparePlan"
+          @prepare-quarantine="createQuarantineIndex"
+        />
 
-      <CleanupExecutionPanel
-        :plan="cleanupPlan"
-        :challenge="executionChallenge"
-        :report="executionReport"
-        :quarantine="executionQuarantine"
-        :error="executionError"
-        :is-preparing="isPreparingExecution"
-        :is-executing="isExecuting"
-        :restoring-entry-id="restoringEntryId"
-        :is-restoring-batch="isRestoringBatch"
-        :is-updating-policy="isUpdatingPolicy"
-        @prepare-execution="prepareCleanupExecution"
-        @execute="executeConfirmedCleanup"
-        @restore="restoreCleanupEntry"
-        @restore-batch="restoreCleanupBatch"
-        @update-policy="updateCleanupPolicy"
-      />
+        <CleanupExecutionPanel
+          :plan="cleanupPlan"
+          :challenge="executionChallenge"
+          :report="executionReport"
+          :quarantine="executionQuarantine"
+          :error="executionError"
+          :is-preparing="isPreparingExecution"
+          :is-executing="isExecuting"
+          :restoring-entry-id="restoringEntryId"
+          :is-restoring-batch="isRestoringBatch"
+          :is-updating-policy="isUpdatingPolicy"
+          @prepare-execution="prepareCleanupExecution"
+          @execute="executeConfirmedCleanup"
+          @restore="restoreCleanupEntry"
+          @restore-batch="restoreCleanupBatch"
+          @update-policy="updateCleanupPolicy"
+        />
+      </div>
 
-      <SpaceScanPanel
-        :snapshot="spaceScan"
-        :history="spaceScanHistory"
-        :error="spaceScanError"
-        :is-starting="isStartingSpaceScan"
-        v-model:scan-root="scanRoot"
-        v-model:max-depth="scanMaxDepth"
-        v-model:max-entries="scanMaxEntries"
-        v-model:excluded-paths="excludedPaths"
-        @start-scan="startSpaceAnalysis"
-        @pause-scan="pauseScan"
-        @resume-scan="resumeScan"
-        @cancel-scan="cancelScan"
-      />
+      <div ref="spaceSection" class="dashboard-section">
+        <SpaceScanPanel
+          :snapshot="spaceScan"
+          :history="spaceScanHistory"
+          :error="spaceScanError"
+          :is-starting="isStartingSpaceScan"
+          v-model:scan-root="scanRoot"
+          v-model:max-depth="scanMaxDepth"
+          v-model:max-entries="scanMaxEntries"
+          v-model:excluded-paths="excludedPaths"
+          @start-scan="startSpaceAnalysis"
+          @pause-scan="pauseScan"
+          @resume-scan="resumeScan"
+          @cancel-scan="cancelScan"
+        />
+      </div>
 
       <div class="section-heading">
         <h2>状态概览</h2>
@@ -353,6 +428,9 @@ onMounted(async () => {
 .dashboard {
   max-width: 1180px;
   margin: 0 auto;
+}
+.dashboard-section {
+  scroll-margin-top: 24px;
 }
 .page-header,
 .section-heading {

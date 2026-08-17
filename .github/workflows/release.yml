@@ -108,7 +108,7 @@ jobs:
         with:
           projectPath: apps/desktop
           tagName: ${{ env.RELEASE_TAG }}
-          releaseName: 澄盘 ${{ env.RELEASE_TAG }}
+          releaseName: Clarity Disk ${{ env.RELEASE_TAG }}
           releaseBody: See CHANGELOG.md for details.
           releaseDraft: true
           prerelease: false

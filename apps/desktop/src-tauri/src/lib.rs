@@ -32,13 +32,29 @@ static AUTOMATIC_MAINTENANCE: OnceLock<automatic_maintenance::AutomaticMaintenan
 const GIB: u64 = 1024 * 1024 * 1024;
 const MIB: u64 = 1024 * 1024;
 
+/// Runs blocking Windows discovery or filesystem work outside Tauri's command
+/// dispatch thread so navigation and repainting remain responsive.
+async fn run_blocking<T, F>(operation_name: &'static str, operation: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(operation)
+        .await
+        .map_err(|error| format!("{operation_name} 后台任务异常终止：{error}"))?
+}
+
 /// Returns the current dashboard snapshot.
 ///
 /// Disk capacity comes from read-only platform discovery. Cleanup categories,
 /// device health, and recommendations remain preview data until their dedicated
 /// scanners are implemented.
 #[tauri::command]
-fn get_dashboard_snapshot() -> Result<DashboardSnapshot, String> {
+async fn get_dashboard_snapshot() -> Result<DashboardSnapshot, String> {
+    run_blocking("磁盘概览发现", build_dashboard_snapshot).await
+}
+
+fn build_dashboard_snapshot() -> Result<DashboardSnapshot, String> {
     let started = Instant::now();
     let disks = disk_discovery::discover_disks().map_err(|error| error.to_string())?;
     let disk = disks
@@ -95,7 +111,11 @@ fn get_dashboard_snapshot() -> Result<DashboardSnapshot, String> {
 
 /// Produces a read-only cleanup preview from versioned allow-listed rules.
 #[tauri::command]
-fn scan_cleanup_preview() -> Result<clarity_core::CleanupPreview, String> {
+async fn scan_cleanup_preview() -> Result<clarity_core::CleanupPreview, String> {
+    run_blocking("清理预览扫描", scan_cleanup_preview_blocking).await
+}
+
+fn scan_cleanup_preview_blocking() -> Result<clarity_core::CleanupPreview, String> {
     let started = Instant::now();
     let preview = CLEANUP_WORKFLOW
         .get_or_init(cleanup_workflow::CleanupWorkflow::default)
@@ -292,7 +312,11 @@ fn get_default_space_scan_request(
 
 /// Returns a fresh read-only physical disk and partition topology.
 #[tauri::command]
-fn get_partition_topology() -> Result<clarity_core::PartitionTopology, String> {
+async fn get_partition_topology() -> Result<clarity_core::PartitionTopology, String> {
+    run_blocking("分区拓扑发现", discover_partition_topology).await
+}
+
+fn discover_partition_topology() -> Result<clarity_core::PartitionTopology, String> {
     let started = Instant::now();
     let topology =
         partition_discovery::discover_partition_topology().map_err(|error| error.to_string())?;
@@ -302,30 +326,43 @@ fn get_partition_topology() -> Result<clarity_core::PartitionTopology, String> {
 
 /// Returns a fresh, privacy-preserving, read-only physical-disk health snapshot.
 #[tauri::command]
-fn get_disk_health_snapshot() -> Result<clarity_core::DiskHealthSnapshot, String> {
-    disk_health_discovery::discover_disk_health().map_err(|error| error.to_string())
+async fn get_disk_health_snapshot() -> Result<clarity_core::DiskHealthSnapshot, String> {
+    run_blocking("磁盘健康发现", || {
+        disk_health_discovery::discover_disk_health().map_err(|error| error.to_string())
+    })
+    .await
 }
 
 /// Re-discovers disk state and evaluates a non-authorizing merge preview.
 #[tauri::command]
-#[allow(clippy::needless_pass_by_value)]
-fn preview_partition_merge(
+async fn preview_partition_merge(
     request: clarity_core::MergePreviewRequest,
+) -> Result<clarity_core::MergePreview, String> {
+    run_blocking("分区合并预演", move || {
+        preview_partition_merge_blocking(&request)
+    })
+    .await
+}
+
+fn preview_partition_merge_blocking(
+    request: &clarity_core::MergePreviewRequest,
 ) -> Result<clarity_core::MergePreview, String> {
     let topology =
         partition_discovery::discover_partition_topology().map_err(|error| error.to_string())?;
     topology
-        .preview_merge(&request)
+        .preview_merge(request)
         .map_err(|error| error.to_string())
 }
 
 /// Re-discovers topology and system evidence to build a non-authorizing safety plan.
 #[tauri::command]
-#[allow(clippy::needless_pass_by_value)]
-fn assess_partition_merge_safety(
+async fn assess_partition_merge_safety(
     request: clarity_core::MergePreviewRequest,
 ) -> Result<clarity_core::PartitionSafetyAssessment, String> {
-    build_partition_safety_assessment(&request)
+    run_blocking("分区安全评估", move || {
+        build_partition_safety_assessment(&request)
+    })
+    .await
 }
 
 fn build_partition_safety_assessment(
@@ -362,11 +399,19 @@ fn prepare_maintenance_execution(
 
 /// Re-discovers partition evidence and prepares execution only when all gates pass.
 #[tauri::command]
-#[allow(clippy::needless_pass_by_value)]
-fn prepare_partition_execution(
+async fn prepare_partition_execution(
     request: clarity_core::MergePreviewRequest,
 ) -> Result<privileged_workflow::PartitionExecutionPreparation, String> {
-    let assessment = build_partition_safety_assessment(&request)?;
+    run_blocking("分区执行准备", move || {
+        prepare_partition_execution_blocking(&request)
+    })
+    .await
+}
+
+fn prepare_partition_execution_blocking(
+    request: &clarity_core::MergePreviewRequest,
+) -> Result<privileged_workflow::PartitionExecutionPreparation, String> {
+    let assessment = build_partition_safety_assessment(request)?;
     PRIVILEGED_WORKFLOW
         .get_or_init(privileged_workflow::PrivilegedWorkflow::default)
         .prepare_partition(assessment)
@@ -374,13 +419,15 @@ fn prepare_partition_execution(
 
 /// Consumes a one-time challenge and crosses the Windows UAC boundary.
 #[tauri::command]
-#[allow(clippy::needless_pass_by_value)]
-fn execute_privileged_operation(
+async fn execute_privileged_operation(
     request: privileged_workflow::ExecutePrivilegedRequest,
 ) -> Result<clarity_privileged_protocol::PrivilegedExecutionReport, String> {
-    PRIVILEGED_WORKFLOW
-        .get_or_init(privileged_workflow::PrivilegedWorkflow::default)
-        .execute(&request)
+    run_blocking("管理员操作执行", move || {
+        PRIVILEGED_WORKFLOW
+            .get_or_init(privileged_workflow::PrivilegedWorkflow::default)
+            .execute(&request)
+    })
+    .await
 }
 
 /// Returns newest privacy-preserving privileged terminal events.
@@ -401,21 +448,60 @@ fn get_app_settings() -> clarity_core::AppSettings {
 
 /// Persists validated settings and synchronizes the reviewed quarantine policy.
 #[tauri::command]
-#[allow(clippy::needless_pass_by_value)]
-fn update_app_settings(
+async fn update_app_settings(
+    settings: clarity_core::AppSettings,
+) -> Result<clarity_core::AppSettings, String> {
+    run_blocking("设置保存", move || {
+        update_app_settings_blocking(settings)
+    })
+    .await
+}
+
+fn update_app_settings_blocking(
     settings: clarity_core::AppSettings,
 ) -> Result<clarity_core::AppSettings, String> {
     settings.validate().map_err(|error| error.to_string())?;
-    startup_behavior::apply_launch_at_login(settings.launch_at_login)?;
-    CLEANUP_WORKFLOW
-        .get_or_init(cleanup_workflow::CleanupWorkflow::default)
-        .update_policy(clarity_core::UpdateQuarantinePolicyRequest {
-            retention_days: settings.quarantine_retention_days,
-            max_bytes: settings.quarantine_max_bytes,
-        })?;
-    let updated = SETTINGS
-        .get_or_init(settings_store::SettingsStore::default)
-        .replace(settings)?;
+    let store = SETTINGS.get_or_init(settings_store::SettingsStore::default);
+    let previous = store.get();
+    let startup_changed = previous.launch_at_login != settings.launch_at_login;
+    let policy_changed = previous.quarantine_retention_days != settings.quarantine_retention_days
+        || previous.quarantine_max_bytes != settings.quarantine_max_bytes;
+
+    // Avoid touching Windows integration when unrelated preferences are saved.
+    if startup_changed {
+        startup_behavior::apply_launch_at_login(settings.launch_at_login)?;
+    }
+    if policy_changed
+        && let Err(error) = CLEANUP_WORKFLOW
+            .get_or_init(cleanup_workflow::CleanupWorkflow::default)
+            .update_policy(clarity_core::UpdateQuarantinePolicyRequest {
+                retention_days: settings.quarantine_retention_days,
+                max_bytes: settings.quarantine_max_bytes,
+            })
+    {
+        if startup_changed {
+            let _ = startup_behavior::apply_launch_at_login(previous.launch_at_login);
+        }
+        return Err(error);
+    }
+
+    let updated = match store.replace(settings) {
+        Ok(updated) => updated,
+        Err(error) => {
+            if policy_changed {
+                let _ = CLEANUP_WORKFLOW
+                    .get_or_init(cleanup_workflow::CleanupWorkflow::default)
+                    .update_policy(clarity_core::UpdateQuarantinePolicyRequest {
+                        retention_days: previous.quarantine_retention_days,
+                        max_bytes: previous.quarantine_max_bytes,
+                    });
+            }
+            if startup_changed {
+                let _ = startup_behavior::apply_launch_at_login(previous.launch_at_login);
+            }
+            return Err(error);
+        }
+    };
     diagnostics::set_crash_retention(updated.retain_crash_diagnostics);
     if !updated.retain_crash_diagnostics {
         diagnostics::clear_crash_reports()?;
@@ -425,7 +511,12 @@ fn update_app_settings(
 
 /// Evaluates protections and runs only a due read-only cleanup scan.
 #[tauri::command]
-fn run_automatic_maintenance()
+async fn run_automatic_maintenance()
+-> Result<automatic_maintenance::AutomaticMaintenanceRunReport, String> {
+    run_blocking("自动维护评估", run_automatic_maintenance_blocking).await
+}
+
+fn run_automatic_maintenance_blocking()
 -> Result<automatic_maintenance::AutomaticMaintenanceRunReport, String> {
     let settings = SETTINGS
         .get_or_init(settings_store::SettingsStore::default)

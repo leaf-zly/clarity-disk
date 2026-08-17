@@ -1,7 +1,8 @@
 import { flushPromises, mount } from "@vue/test-utils";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import SettingsPage from "@/pages/SettingsPage.vue";
+import { updateAppSettings } from "@/services/operations-service";
 
 const settings = {
   schemaVersion: 1 as const,
@@ -39,6 +40,10 @@ vi.mock("@/services/operations-service", () => ({
 }));
 
 describe("SettingsPage", () => {
+  beforeEach(() => {
+    vi.mocked(updateAppSettings).mockImplementation(async (value) => value);
+  });
+
   it("shows privacy-first automatic maintenance and release protections", async () => {
     const wrapper = mount(SettingsPage);
     await flushPromises();
@@ -47,5 +52,20 @@ describe("SettingsPage", () => {
     expect(wrapper.text()).toContain("不会自动删除");
     expect(wrapper.text()).toContain("Authenticode 与 SHA-256");
     expect(wrapper.text()).toContain("首页 1.5 秒");
+  });
+
+  it("shows a localized actionable error when Windows startup integration fails", async () => {
+    vi.mocked(updateAppSettings).mockRejectedValueOnce(
+      new Error("Windows rejected the fixed launch-at-login update"),
+    );
+    const wrapper = mount(SettingsPage);
+    await flushPromises();
+
+    await wrapper.get("button.primary").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get('[role="alert"]').text()).toBe(
+      "Windows 登录启动设置保存失败，其他设置未更改。",
+    );
   });
 });

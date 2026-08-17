@@ -106,12 +106,33 @@ impl AutomaticMaintenanceCoordinator {
         settings: &AppSettings,
         scan: impl FnOnce() -> Result<CleanupPreview, String>,
     ) -> Result<AutomaticMaintenanceRunReport, String> {
-        let discovered = discover_context()?;
         let now_unix_ms = unix_ms();
         let mut state = self
             .state
             .lock()
             .expect("automatic maintenance state poisoned");
+        // Cadence is evaluated with permissive machine evidence first. This
+        // avoids launching Windows discovery when maintenance is disabled or
+        // not due, while real evidence still gates every eligible scan.
+        let cadence = AutomaticMaintenanceDecision::evaluate(
+            settings.automatic_maintenance,
+            AutomaticMaintenanceContext {
+                now_unix_ms,
+                last_run_at_unix_ms: state.last_run_at_unix_ms,
+                idle_seconds: u32::MAX,
+                stable_power: true,
+                system_update_active: false,
+                backup_active: false,
+            },
+        );
+        if !cadence.should_run {
+            return Ok(AutomaticMaintenanceRunReport {
+                decision: cadence,
+                preview: None,
+            });
+        }
+
+        let discovered = discover_context()?;
         let decision = AutomaticMaintenanceDecision::evaluate(
             settings.automatic_maintenance,
             AutomaticMaintenanceContext {
@@ -196,7 +217,9 @@ fn unix_ms() -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::AutomaticMaintenanceState;
+    use clarity_core::{AppSettings, AutomaticMaintenanceReason};
+
+    use super::{AutomaticMaintenanceCoordinator, AutomaticMaintenanceState};
 
     #[test]
     fn state_defaults_without_prior_run() {
@@ -204,5 +227,16 @@ mod tests {
             AutomaticMaintenanceState::default().last_run_at_unix_ms,
             None
         );
+    }
+
+    #[test]
+    fn disabled_schedule_skips_platform_discovery_and_scan() {
+        let report = AutomaticMaintenanceCoordinator::default()
+            .run_if_due(&AppSettings::default(), || {
+                panic!("disabled maintenance must not scan")
+            })
+            .expect("disabled maintenance should not need Windows discovery");
+        assert_eq!(report.decision.reason, AutomaticMaintenanceReason::Disabled);
+        assert!(report.preview.is_none());
     }
 }

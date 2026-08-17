@@ -84,7 +84,7 @@ async function save(): Promise<void> {
     diagnostics.value = await getDiagnosticsSnapshot();
     message.value = "设置已验证并保存。";
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : String(error);
+    errorMessage.value = settingsSaveError(error);
   } finally {
     busy.value = false;
   }
@@ -125,6 +125,14 @@ async function clearDiagnostics(): Promise<void> {
 function applyTheme(theme: AppSettings["theme"]): void {
   document.documentElement.style.colorScheme =
     theme === "system" ? "light dark" : theme;
+}
+
+function settingsSaveError(error: unknown): string {
+  const detail = error instanceof Error ? error.message : String(error);
+  if (/launch-at-login|登录启动|startup/i.test(detail)) {
+    return "Windows 登录启动设置保存失败，其他设置未更改。";
+  }
+  return `设置保存失败：${detail}`;
 }
 
 function maintenanceLabel(report: AutomaticMaintenanceRunReport): string {
@@ -192,7 +200,7 @@ onMounted(() => void load());
           >
           <label class="switch"
             ><input v-model="settings.launchAtLogin" type="checkbox" /><span
-              >登录 Windows 后启动澄盘</span
+              >登录 Windows 后启动 Clarity Disk</span
             ></label
           >
           <label class="switch"

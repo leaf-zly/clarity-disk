@@ -29,7 +29,7 @@ $uninstallRoots = @(
   'Registry::HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\Uninstall\*'
 )
 $entry = Get-ItemProperty -Path $uninstallRoots -ErrorAction SilentlyContinue |
-  Where-Object { $_.DisplayName -eq '澄盘' } |
+  Where-Object { $_.DisplayName -eq 'Clarity Disk' } |
   Select-Object -First 1
 if (-not $entry -or -not $entry.InstallLocation) { throw 'Installed Clarity Disk registry entry was not found.' }
 

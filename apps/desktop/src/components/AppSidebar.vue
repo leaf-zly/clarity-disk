@@ -14,23 +14,24 @@ import {
   Sparkles,
   Wrench,
 } from "@lucide/vue";
+import type { AppSection } from "@/types/navigation";
 
 /**
  * Props controlling the selected application section.
  */
 interface Props {
-  activeSection: string;
+  activeSection: AppSection;
 }
 
 /**
  * Events emitted when the user navigates through the application shell.
  */
 interface Emits {
-  "update:activeSection": [section: string];
+  "update:activeSection": [section: AppSection];
 }
 
 interface NavigationItem {
-  id: string;
+  id: AppSection;
   label: string;
   icon: Component;
 }
@@ -61,9 +62,9 @@ const secondaryItems: readonly NavigationItem[] = [
 
 <template>
   <aside class="sidebar">
-    <div class="brand" aria-label="澄盘">
+    <div class="brand" aria-label="Clarity Disk">
       <span class="brand-mark"><Layers3 :size="18" aria-hidden="true" /></span>
-      <span class="brand-name">澄盘</span>
+      <span class="brand-name">Clarity Disk</span>
     </div>
 
     <nav class="navigation" aria-label="主要导航">

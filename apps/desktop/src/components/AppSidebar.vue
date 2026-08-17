@@ -3,6 +3,7 @@ import type { Component } from "vue";
 import {
   Activity,
   Files,
+  History,
   LayoutDashboard,
   Layers3,
   PanelsTopLeft,
@@ -53,6 +54,7 @@ const diskItems: readonly NavigationItem[] = [
 const secondaryItems: readonly NavigationItem[] = [
   { id: "maintenance", label: "管理员维护", icon: Wrench },
   { id: "recovery", label: "恢复中心", icon: RotateCcw },
+  { id: "history", label: "活动历史", icon: History },
   { id: "settings", label: "设置", icon: Settings2 },
 ];
 </script>

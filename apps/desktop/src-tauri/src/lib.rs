@@ -2,24 +2,32 @@
 
 use clarity_core::{CleanupSummary, DashboardSnapshot, DiskHealth, Suggestion, SuggestionRisk};
 use std::sync::OnceLock;
+use std::time::Instant;
 
 mod audit_store;
+mod automatic_maintenance;
 mod cleanup_adapters;
 mod cleanup_executor;
 mod cleanup_scan;
 mod cleanup_workflow;
+mod diagnostics;
 mod disk_discovery;
 mod disk_health_discovery;
 mod partition_discovery;
 mod partition_safety_discovery;
 mod privileged_workflow;
 mod quarantine_store;
+mod settings_store;
 mod space_scan;
+mod startup_behavior;
 mod state_store;
 
 static SPACE_SCANS: OnceLock<space_scan::SpaceScanManager> = OnceLock::new();
 static CLEANUP_WORKFLOW: OnceLock<cleanup_workflow::CleanupWorkflow> = OnceLock::new();
 static PRIVILEGED_WORKFLOW: OnceLock<privileged_workflow::PrivilegedWorkflow> = OnceLock::new();
+static SETTINGS: OnceLock<settings_store::SettingsStore> = OnceLock::new();
+static AUTOMATIC_MAINTENANCE: OnceLock<automatic_maintenance::AutomaticMaintenanceCoordinator> =
+    OnceLock::new();
 
 const GIB: u64 = 1024 * 1024 * 1024;
 const MIB: u64 = 1024 * 1024;
@@ -31,6 +39,7 @@ const MIB: u64 = 1024 * 1024;
 /// scanners are implemented.
 #[tauri::command]
 fn get_dashboard_snapshot() -> Result<DashboardSnapshot, String> {
+    let started = Instant::now();
     let disks = disk_discovery::discover_disks().map_err(|error| error.to_string())?;
     let disk = disks
         .iter()
@@ -48,7 +57,7 @@ fn get_dashboard_snapshot() -> Result<DashboardSnapshot, String> {
         has_warning: disk.metadata.health_status != clarity_core::VolumeHealthStatus::Healthy,
     };
 
-    Ok(DashboardSnapshot {
+    let snapshot = DashboardSnapshot {
         disk,
         disks,
         health,
@@ -79,15 +88,20 @@ fn get_dashboard_snapshot() -> Result<DashboardSnapshot, String> {
                 reclaimable_bytes: 389 * MIB,
             },
         ],
-    })
+    };
+    diagnostics::record_performance("dashboardDiscovery", started.elapsed());
+    Ok(snapshot)
 }
 
 /// Produces a read-only cleanup preview from versioned allow-listed rules.
 #[tauri::command]
 fn scan_cleanup_preview() -> Result<clarity_core::CleanupPreview, String> {
-    CLEANUP_WORKFLOW
+    let started = Instant::now();
+    let preview = CLEANUP_WORKFLOW
         .get_or_init(cleanup_workflow::CleanupWorkflow::default)
-        .scan()
+        .scan()?;
+    diagnostics::record_performance("cleanupPreview", started.elapsed());
+    Ok(preview)
 }
 
 /// Creates an immutable plan from IDs in the latest preview without authorizing execution.
@@ -169,6 +183,39 @@ fn restore_quarantine_batch(
         .restore_batch(&request)
 }
 
+/// Restores one entry to an enumerated backend-resolved user folder.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn restore_quarantine_entry_to(
+    request: clarity_core::RestoreQuarantineToRequest,
+) -> Result<clarity_core::QuarantineRestoreResult, String> {
+    CLEANUP_WORKFLOW
+        .get_or_init(cleanup_workflow::CleanupWorkflow::default)
+        .restore_to(&request)
+}
+
+/// Prepares a short-lived challenge for permanent quarantine deletion.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn prepare_quarantine_deletion(
+    request: clarity_core::PrepareQuarantineDeletionRequest,
+) -> Result<clarity_core::QuarantineDeletionChallenge, String> {
+    CLEANUP_WORKFLOW
+        .get_or_init(cleanup_workflow::CleanupWorkflow::default)
+        .prepare_deletion(&request)
+}
+
+/// Consumes a one-time challenge and deletes only revalidated quarantine entries.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn execute_quarantine_deletion(
+    request: clarity_core::ExecuteQuarantineDeletionRequest,
+) -> Result<clarity_core::QuarantineDeletionReport, String> {
+    CLEANUP_WORKFLOW
+        .get_or_init(cleanup_workflow::CleanupWorkflow::default)
+        .execute_deletion(&request)
+}
+
 /// Updates quarantine retention and capacity from reviewed fixed tiers.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)]
@@ -246,7 +293,11 @@ fn get_default_space_scan_request(
 /// Returns a fresh read-only physical disk and partition topology.
 #[tauri::command]
 fn get_partition_topology() -> Result<clarity_core::PartitionTopology, String> {
-    partition_discovery::discover_partition_topology().map_err(|error| error.to_string())
+    let started = Instant::now();
+    let topology =
+        partition_discovery::discover_partition_topology().map_err(|error| error.to_string())?;
+    diagnostics::record_performance("partitionDiscovery", started.elapsed());
+    Ok(topology)
 }
 
 /// Returns a fresh, privacy-preserving, read-only physical-disk health snapshot.
@@ -285,7 +336,7 @@ fn build_partition_safety_assessment(
     let preview = topology
         .preview_merge(request)
         .map_err(|error| error.to_string())?;
-    let evidence = partition_safety_discovery::discover_partition_safety_evidence()
+    let evidence = partition_safety_discovery::discover_partition_safety_evidence(&preview.disk_id)
         .map_err(|error| error.to_string())?;
     let now_unix_ms = evidence.captured_at_unix_ms;
     clarity_core::PartitionSafetyAssessment::try_new(&preview, evidence, now_unix_ms)
@@ -340,6 +391,83 @@ fn get_privileged_audit_events() -> Vec<privileged_workflow::PrivilegedAuditEven
         .audit_events()
 }
 
+/// Returns validated, versioned local application settings.
+#[tauri::command]
+fn get_app_settings() -> clarity_core::AppSettings {
+    SETTINGS
+        .get_or_init(settings_store::SettingsStore::default)
+        .get()
+}
+
+/// Persists validated settings and synchronizes the reviewed quarantine policy.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn update_app_settings(
+    settings: clarity_core::AppSettings,
+) -> Result<clarity_core::AppSettings, String> {
+    settings.validate().map_err(|error| error.to_string())?;
+    startup_behavior::apply_launch_at_login(settings.launch_at_login)?;
+    CLEANUP_WORKFLOW
+        .get_or_init(cleanup_workflow::CleanupWorkflow::default)
+        .update_policy(clarity_core::UpdateQuarantinePolicyRequest {
+            retention_days: settings.quarantine_retention_days,
+            max_bytes: settings.quarantine_max_bytes,
+        })?;
+    let updated = SETTINGS
+        .get_or_init(settings_store::SettingsStore::default)
+        .replace(settings)?;
+    diagnostics::set_crash_retention(updated.retain_crash_diagnostics);
+    if !updated.retain_crash_diagnostics {
+        diagnostics::clear_crash_reports()?;
+    }
+    Ok(updated)
+}
+
+/// Evaluates protections and runs only a due read-only cleanup scan.
+#[tauri::command]
+fn run_automatic_maintenance()
+-> Result<automatic_maintenance::AutomaticMaintenanceRunReport, String> {
+    let settings = SETTINGS
+        .get_or_init(settings_store::SettingsStore::default)
+        .get();
+    AUTOMATIC_MAINTENANCE
+        .get_or_init(automatic_maintenance::AutomaticMaintenanceCoordinator::default)
+        .run_if_due(&settings, || {
+            let started = Instant::now();
+            let preview = CLEANUP_WORKFLOW
+                .get_or_init(cleanup_workflow::CleanupWorkflow::default)
+                .scan()?;
+            diagnostics::record_performance("cleanupPreview", started.elapsed());
+            Ok(preview)
+        })
+}
+
+/// Returns local privacy-safe crash markers and performance timings.
+#[tauri::command]
+fn get_diagnostics_snapshot() -> diagnostics::DiagnosticsSnapshot {
+    diagnostics::snapshot()
+}
+
+/// Clears privacy-safe crash markers without touching audit or recovery records.
+#[tauri::command]
+fn clear_crash_diagnostics() -> Result<(), String> {
+    diagnostics::clear_crash_reports()
+}
+
+/// Clears scan and audit history while preserving quarantine and recovery state.
+#[tauri::command]
+fn clear_activity_history() -> Result<(), String> {
+    CLEANUP_WORKFLOW
+        .get_or_init(cleanup_workflow::CleanupWorkflow::default)
+        .clear_audit_events()?;
+    SPACE_SCANS
+        .get_or_init(space_scan::SpaceScanManager::default)
+        .clear_history()?;
+    PRIVILEGED_WORKFLOW
+        .get_or_init(privileged_workflow::PrivilegedWorkflow::default)
+        .clear_audit_events()
+}
+
 /// Starts the desktop runtime and registers the minimal command surface.
 ///
 /// # Panics
@@ -347,6 +475,11 @@ fn get_privileged_audit_events() -> Vec<privileged_workflow::PrivilegedAuditEven
 /// Panics when Tauri cannot initialize or the desktop event loop terminates
 /// with a fatal runtime error.
 pub fn run() {
+    let settings = SETTINGS
+        .get_or_init(settings_store::SettingsStore::default)
+        .get();
+    diagnostics::set_crash_retention(settings.retain_crash_diagnostics);
+    diagnostics::install_panic_hook();
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             get_dashboard_snapshot,
@@ -359,6 +492,9 @@ pub fn run() {
             execute_cleanup,
             restore_quarantine_entry,
             restore_quarantine_batch,
+            restore_quarantine_entry_to,
+            prepare_quarantine_deletion,
+            execute_quarantine_deletion,
             update_quarantine_policy,
             start_space_scan,
             get_space_scan,
@@ -375,7 +511,13 @@ pub fn run() {
             prepare_maintenance_execution,
             prepare_partition_execution,
             execute_privileged_operation,
-            get_privileged_audit_events
+            get_privileged_audit_events,
+            get_app_settings,
+            update_app_settings,
+            run_automatic_maintenance,
+            get_diagnostics_snapshot,
+            clear_crash_diagnostics,
+            clear_activity_history
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Clarity Disk");

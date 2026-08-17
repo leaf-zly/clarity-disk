@@ -334,7 +334,7 @@ function submitPolicy(): void {
     </div>
     <div class="permanent-delete-lock">
       <ShieldAlert :size="15" aria-hidden="true" /><span
-        >隔离区永久删除功能尚未开放，需完成单独安全评审。</span
+        >永久删除与受控位置恢复已移至侧栏“恢复中心”，并使用独立一次性确认。</span
       >
     </div>
   </section>

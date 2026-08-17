@@ -13,6 +13,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 concurrency:
   group: release-${{ inputs.tag || github.ref_name }}
@@ -25,9 +27,11 @@ jobs:
     timeout-minutes: 20
     env:
       RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      WINDOWS_CERTIFICATE_PFX_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 }}
+      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
     steps:
       - name: Checkout release tag
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ env.RELEASE_TAG }}
 
@@ -37,7 +41,7 @@ jobs:
           run_install: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: pnpm
@@ -62,10 +66,37 @@ jobs:
       - name: Verify frontend
         run: pnpm --filter @clarity-disk/desktop typecheck
 
+      - name: Require and import Authenticode certificate
+        shell: pwsh
+        run: |
+          if (-not $env:WINDOWS_CERTIFICATE_PFX_BASE64 -or -not $env:WINDOWS_CERTIFICATE_PASSWORD) {
+            throw 'Signed releases require WINDOWS_CERTIFICATE_PFX_BASE64 and WINDOWS_CERTIFICATE_PASSWORD secrets.'
+          }
+          $pfxPath = Join-Path $env:RUNNER_TEMP 'clarity-disk-release.pfx'
+          [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_PFX_BASE64))
+          $password = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+          $certificate = Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation 'Cert:\CurrentUser\My' -Password $password -Exportable:$false
+          if (-not $certificate -or -not $certificate.HasPrivateKey) { throw 'Authenticode certificate import failed.' }
+          "WINDOWS_CERTIFICATE_THUMBPRINT=$($certificate.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          $signingConfig = @{
+            bundle = @{ windows = @{
+              certificateThumbprint = $certificate.Thumbprint
+              digestAlgorithm = 'sha256'
+              timestampUrl = 'http://timestamp.digicert.com'
+            } }
+          } | ConvertTo-Json -Depth 5
+          Set-Content -LiteralPath 'apps\desktop\src-tauri\tauri.signing.conf.json' -Value $signingConfig -Encoding utf8
+          Remove-Item -LiteralPath $pfxPath
+
       - name: Build privileged broker
         shell: pwsh
         run: |
           cargo build --release --locked -p clarity-privileged-service --features partition-writes
+          $signTool = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" |
+            Sort-Object { $_.VersionInfo.FileVersionRaw } |
+            Select-Object -Last 1 -ExpandProperty FullName
+          if (-not $signTool) { throw 'Windows SDK signtool.exe was not found.' }
+          & $signTool sign /sha1 $env:WINDOWS_CERTIFICATE_THUMBPRINT /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 'target\release\clarity-privileged-service.exe'
           $binaryRoot = "apps\desktop\src-tauri\binaries"
           New-Item -ItemType Directory -Path $binaryRoot -Force | Out-Null
           Copy-Item -LiteralPath "target\release\clarity-privileged-service.exe" -Destination "$binaryRoot\clarity-privileged-service-x86_64-pc-windows-msvc.exe"
@@ -81,7 +112,24 @@ jobs:
           releaseBody: See CHANGELOG.md for details.
           releaseDraft: true
           prerelease: false
-          args: --bundles nsis --config src-tauri/tauri.release.conf.json
+          args: --bundles nsis --config src-tauri/tauri.release.conf.json --config src-tauri/tauri.signing.conf.json
+
+      - name: Verify signed publisher and installer lifecycle
+        shell: pwsh
+        run: |
+          $artifacts = @(
+            'target\release\clarity-disk.exe',
+            'target\release\clarity-privileged-service.exe'
+          )
+          $artifacts += Get-ChildItem -Path 'target\release\bundle\nsis\*.exe' | ForEach-Object FullName
+          foreach ($artifact in $artifacts) {
+            $signature = Get-AuthenticodeSignature -LiteralPath $artifact
+            if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Thumbprint -ne $env:WINDOWS_CERTIFICATE_THUMBPRINT) {
+              throw "Unexpected or invalid Authenticode signature: $artifact"
+            }
+          }
+          $installer = Get-ChildItem -Path 'target\release\bundle\nsis\*.exe' | Select-Object -First 1
+          .\scripts\release\Test-WindowsInstaller.ps1 -InstallerPath $installer.FullName -ExpectedThumbprint $env:WINDOWS_CERTIFICATE_THUMBPRINT
 
       - name: Create portable archive and checksums
         shell: pwsh
@@ -106,3 +154,11 @@ jobs:
           gh release upload $env:RELEASE_TAG $portable $checksumFile --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Attest release provenance
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: |
+            target/release/bundle/nsis/*.exe
+            target/release/*-windows-x64-portable.zip
+            target/release/SHA256SUMS.txt

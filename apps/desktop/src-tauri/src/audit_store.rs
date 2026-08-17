@@ -52,6 +52,18 @@ impl AuditStore {
             .expect("cleanup audit state poisoned")
             .clone()
     }
+
+    /// Clears all cleanup audit events using the same recoverable file swap.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the empty audit document cannot be persisted.
+    pub(crate) fn clear(&self) -> Result<(), StateStoreError> {
+        let mut events = self.events.lock().expect("cleanup audit state poisoned");
+        write_json(&self.path, &Vec::<AuditEvent>::new())?;
+        events.clear();
+        Ok(())
+    }
 }
 
 fn normalize(events: &mut Vec<AuditEvent>) {
@@ -94,6 +106,32 @@ mod tests {
             format!("event-{MAX_AUDIT_EVENTS}")
         );
         fs::write(&path, b"not-json").expect("corrupt fixture should write");
+        assert!(AuditStore::with_path(path).events().is_empty());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn audit_can_be_cleared_durably() {
+        let root = std::env::temp_dir().join(format!(
+            "clarity-disk-audit-clear-test-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let path = root.join("audit-events.json");
+        let store = AuditStore::with_path(path.clone());
+        store
+            .record(AuditEvent {
+                event_id: "event".to_owned(),
+                kind: AuditEventKind::ScanCompleted,
+                subject_id: "scan".to_owned(),
+                occurred_at_unix_ms: 1,
+                reason: None,
+                candidate_count: 0,
+                total_bytes: 0,
+                rule_ids: vec![],
+            })
+            .expect("event should persist");
+        store.clear().expect("audit should clear");
         assert!(AuditStore::with_path(path).events().is_empty());
         let _ = fs::remove_dir_all(root);
     }

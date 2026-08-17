@@ -14,7 +14,7 @@
 - 管理员在 `%ProgramData%\ClarityDisk\enable-experimental-partition-writes.v1` 写入精确内容 `enable:v1`；
 - 五分钟内的计划 v2 完整匹配磁盘唯一 ID、磁盘号、GUID、分区号、偏移、容量和剩余空间；
 - 外接电源/桌面供电、无待重启、健康、BitLocker、VSS、NTFS、相邻关系和 5% 迁移余量全部通过；
-- 独立备份提供程序返回 `Verified`。当前产品没有伪造该证据，因此真实用户流程继续在此门禁安全阻塞。
+- 独立备份提供程序只在管理员保护凭据证明另一物理磁盘上的实际恢复摘要时返回 `Verified`；凭据缺失的普通安装继续安全阻塞。
 
 ## 2. 协议与一次性握手
 

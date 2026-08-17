@@ -1,23 +1,28 @@
 //! Platform-independent domain models and safety rules for Clarity Disk.
 
+mod backup;
 mod cleanup;
 mod dashboard;
 mod health;
 mod partition;
 mod partition_safety;
+mod settings;
 mod space_scan;
 
+pub use backup::{BackupVerificationError, BackupVerificationReceipt};
 pub use cleanup::{
     AuditEvent, AuditEventKind, CLEANUP_CONFIRMATION_PHRASE, CleanupCandidate, CleanupError,
     CleanupExecutionChallenge, CleanupExecutionItemResult, CleanupExecutionItemStatus,
     CleanupExecutionMode, CleanupExecutionReport, CleanupPlan, CleanupPlanError, CleanupPreview,
     CleanupRuleAvailability, CleanupRuleStatus, ExecuteCleanupRequest,
-    PrepareCleanupExecutionRequest, PrepareCleanupPlanRequest, QuarantineEntry,
-    QuarantineEntryStatus, QuarantineError, QuarantineIndex, QuarantinePolicy,
-    QuarantinePolicyError, QuarantineRestoreBatchReport, QuarantineRestoreResult,
-    QuarantineTransferKind, RECYCLE_BIN_CONFIRMATION_PHRASE, RecoveryStrategy,
-    RestoreQuarantineBatchRequest, RestoreQuarantineRequest, ScanProgress, ScanStatus,
-    UpdateQuarantinePolicyRequest,
+    ExecuteQuarantineDeletionRequest, PrepareCleanupExecutionRequest, PrepareCleanupPlanRequest,
+    PrepareQuarantineDeletionRequest, QUARANTINE_DELETE_CONFIRMATION_PHRASE,
+    QuarantineDeletionChallenge, QuarantineDeletionReport, QuarantineDeletionResult,
+    QuarantineEntry, QuarantineEntryStatus, QuarantineError, QuarantineIndex, QuarantinePolicy,
+    QuarantinePolicyError, QuarantineRestoreBatchReport, QuarantineRestoreDestination,
+    QuarantineRestoreResult, QuarantineTransferKind, RECYCLE_BIN_CONFIRMATION_PHRASE,
+    RecoveryStrategy, RestoreQuarantineBatchRequest, RestoreQuarantineRequest,
+    RestoreQuarantineToRequest, ScanProgress, ScanStatus, UpdateQuarantinePolicyRequest,
 };
 pub use dashboard::{
     CleanupSummary, DashboardError, DashboardSnapshot, DiskCategory, DiskCategoryKind, DiskHealth,
@@ -42,6 +47,11 @@ pub use partition_safety::{
     PartitionSafetyAssessment, PartitionSafetyBlocker, PartitionSafetyBlockerCode,
     PartitionSafetyCheck, PartitionSafetyCheckCode, PartitionSafetyError, PartitionSafetyEvidence,
     PartitionSafetyStatus, PendingRestartState,
+};
+pub use settings::{
+    AppSettings, AutomaticMaintenanceContext, AutomaticMaintenanceDecision,
+    AutomaticMaintenanceReason, AutomaticMaintenanceSchedule, LanguagePreference, LogLevel,
+    SettingsError, ThemePreference,
 };
 pub use space_scan::{
     SpaceScanEntry, SpaceScanError, SpaceScanHistoryEntry, SpaceScanProgress, SpaceScanRequest,

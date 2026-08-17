@@ -11,7 +11,8 @@ use std::{
 };
 
 use clarity_core::{
-    BackupEvidenceState, ExternalPowerState, PartitionSafetyEvidence, PendingRestartState,
+    BackupEvidenceState, BackupVerificationError, BackupVerificationReceipt, ExternalPowerState,
+    PartitionSafetyEvidence, PendingRestartState,
 };
 use serde::Deserialize;
 
@@ -54,38 +55,68 @@ try {
   $warnings.Add('无法完整读取 Windows 待重启标记，重启检查保持阻塞。')
 }
 
+$backupReceipt = $null
+$backupReceiptAclSafe = $false
+$receiptPath = Join-Path $env:ProgramData 'ClarityDisk\backup-verification.v1.json'
+if (Test-Path -LiteralPath $receiptPath) {
+  try {
+    $acl = Get-Acl -LiteralPath $receiptPath -ErrorAction Stop
+    $ownerSid = ([Security.Principal.NTAccount]$acl.Owner).Translate([Security.Principal.SecurityIdentifier]).Value
+    $ownerSafe = @('S-1-5-18', 'S-1-5-32-544') -contains $ownerSid
+    $unsafeWriter = @($acl.Access | Where-Object {
+      $identitySid = try { $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value } catch { '' }
+      $_.AccessControlType -eq 'Allow' -and
+      @('S-1-1-0', 'S-1-5-11', 'S-1-5-32-545') -contains $identitySid -and
+      ($_.FileSystemRights.ToString() -match '(Write|Modify|FullControl)')
+    }).Count -gt 0
+    $backupReceiptAclSafe = $ownerSafe -and -not $unsafeWriter
+    if ($backupReceiptAclSafe) {
+      $backupReceipt = Get-Content -LiteralPath $receiptPath -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    } else {
+      $warnings.Add('备份恢复凭据可被普通用户修改，独立备份检查保持阻塞。')
+    }
+  } catch {
+    $warnings.Add('无法验证独立备份恢复凭据，备份检查保持阻塞。')
+  }
+}
+
 [ordered]@{
   externalPowerState = $externalPowerState
   pendingRestartState = $pendingRestartState
+  backupReceipt = $backupReceipt
+  backupReceiptAclSafe = $backupReceiptAclSafe
   warnings = @($warnings)
 } | ConvertTo-Json -Depth 4 -Compress
 ";
 
 /// Discovers non-mutating system evidence for a partition safety assessment.
 ///
-/// Backup evidence deliberately remains unavailable until an independent
-/// provider can verify recoverability on another physical device.
+/// A fixed administrator-protected provider receipt is accepted only after it
+/// proves an out-of-place restore on a different physical disk.
 ///
 /// # Errors
 ///
 /// Returns an error when the platform is unsupported, trusted Windows
 /// `PowerShell` cannot be located or launched, or provider JSON is invalid.
-pub fn discover_partition_safety_evidence()
--> Result<PartitionSafetyEvidence, PartitionSafetyDiscoveryError> {
+pub fn discover_partition_safety_evidence(
+    source_disk_id: &str,
+) -> Result<PartitionSafetyEvidence, PartitionSafetyDiscoveryError> {
     #[cfg(not(windows))]
     {
+        let _ = source_disk_id;
         Err(PartitionSafetyDiscoveryError::UnsupportedPlatform)
     }
 
     #[cfg(windows)]
     {
-        discover_windows_partition_safety_evidence()
+        discover_windows_partition_safety_evidence(source_disk_id)
     }
 }
 
 #[cfg(windows)]
-fn discover_windows_partition_safety_evidence()
--> Result<PartitionSafetyEvidence, PartitionSafetyDiscoveryError> {
+fn discover_windows_partition_safety_evidence(
+    source_disk_id: &str,
+) -> Result<PartitionSafetyEvidence, PartitionSafetyDiscoveryError> {
     let output = Command::new(powershell_path()?)
         .args([
             "-NoLogo",
@@ -109,7 +140,7 @@ fn discover_windows_partition_safety_evidence()
     }
     let raw: PowerShellSafetyEvidence = serde_json::from_slice(&output.stdout)
         .map_err(PartitionSafetyDiscoveryError::InvalidProviderResponse)?;
-    Ok(convert_evidence(raw))
+    Ok(convert_evidence(raw, source_disk_id, current_unix_ms()))
 }
 
 #[cfg(windows)]
@@ -130,9 +161,26 @@ fn powershell_path() -> Result<PathBuf, PartitionSafetyDiscoveryError> {
     Ok(executable)
 }
 
-fn convert_evidence(raw: PowerShellSafetyEvidence) -> PartitionSafetyEvidence {
+fn convert_evidence(
+    mut raw: PowerShellSafetyEvidence,
+    source_disk_id: &str,
+    now_unix_ms: u64,
+) -> PartitionSafetyEvidence {
+    let backup_evidence_state = match raw.backup_receipt {
+        None => BackupEvidenceState::Unavailable,
+        Some(_) if !raw.backup_receipt_acl_safe => BackupEvidenceState::Unknown,
+        Some(receipt) => match receipt.verify_for_disk(source_disk_id, now_unix_ms) {
+            Ok(()) => BackupEvidenceState::Verified,
+            Err(BackupVerificationError::Expired) => BackupEvidenceState::Stale,
+            Err(error) => {
+                raw.warnings
+                    .push(format!("独立备份恢复凭据未通过验证：{error}"));
+                BackupEvidenceState::Unknown
+            }
+        },
+    };
     PartitionSafetyEvidence {
-        captured_at_unix_ms: current_unix_ms(),
+        captured_at_unix_ms: now_unix_ms,
         external_power_state: match raw.external_power_state.as_str() {
             "connected" => ExternalPowerState::Connected,
             "desktopNoBattery" => ExternalPowerState::DesktopNoBattery,
@@ -144,9 +192,7 @@ fn convert_evidence(raw: PowerShellSafetyEvidence) -> PartitionSafetyEvidence {
             "present" => PendingRestartState::Present,
             _ => PendingRestartState::Unknown,
         },
-        // User confirmation is not proof of recoverability. A future backup
-        // provider must verify an independent restore before this can pass.
-        backup_evidence_state: BackupEvidenceState::Unavailable,
+        backup_evidence_state,
         discovery_warnings: raw.warnings,
     }
 }
@@ -165,6 +211,10 @@ fn current_unix_ms() -> u64 {
 struct PowerShellSafetyEvidence {
     external_power_state: String,
     pending_restart_state: String,
+    #[serde(default)]
+    backup_receipt: Option<BackupVerificationReceipt>,
+    #[serde(default)]
+    backup_receipt_acl_safe: bool,
     #[serde(default)]
     warnings: Vec<String>,
 }
@@ -199,11 +249,17 @@ mod tests {
 
     #[test]
     fn converts_known_power_and_restart_evidence() {
-        let evidence = convert_evidence(PowerShellSafetyEvidence {
-            external_power_state: "connected".to_owned(),
-            pending_restart_state: "clear".to_owned(),
-            warnings: vec![],
-        });
+        let evidence = convert_evidence(
+            PowerShellSafetyEvidence {
+                external_power_state: "connected".to_owned(),
+                pending_restart_state: "clear".to_owned(),
+                backup_receipt: None,
+                backup_receipt_acl_safe: false,
+                warnings: vec![],
+            },
+            "disk-source",
+            500,
+        );
         assert_eq!(evidence.external_power_state, ExternalPowerState::Connected);
         assert_eq!(evidence.pending_restart_state, PendingRestartState::Clear);
         assert_eq!(
@@ -214,13 +270,65 @@ mod tests {
 
     #[test]
     fn maps_unrecognized_provider_values_to_unknown() {
-        let evidence = convert_evidence(PowerShellSafetyEvidence {
-            external_power_state: "future-value".to_owned(),
-            pending_restart_state: "future-value".to_owned(),
-            warnings: vec!["partial".to_owned()],
-        });
+        let evidence = convert_evidence(
+            PowerShellSafetyEvidence {
+                external_power_state: "future-value".to_owned(),
+                pending_restart_state: "future-value".to_owned(),
+                backup_receipt: None,
+                backup_receipt_acl_safe: false,
+                warnings: vec!["partial".to_owned()],
+            },
+            "disk-source",
+            500,
+        );
         assert_eq!(evidence.external_power_state, ExternalPowerState::Unknown);
         assert_eq!(evidence.pending_restart_state, PendingRestartState::Unknown);
         assert_eq!(evidence.discovery_warnings, vec!["partial"]);
+    }
+
+    #[test]
+    fn only_accepts_acl_protected_matching_restore_receipt() {
+        let receipt = BackupVerificationReceipt {
+            schema_version: 1,
+            source_disk_id: "disk-source".to_owned(),
+            destination_disk_id: "disk-backup".to_owned(),
+            recovery_point_id: "point-1".to_owned(),
+            manifest_sha256: "a".repeat(64),
+            backup_completed_at_unix_ms: 100,
+            restore_verified_at_unix_ms: 200,
+            expires_at_unix_ms: 1_000,
+            restore_digest_verified: true,
+        };
+        let evidence = convert_evidence(
+            PowerShellSafetyEvidence {
+                external_power_state: "connected".to_owned(),
+                pending_restart_state: "clear".to_owned(),
+                backup_receipt: Some(receipt.clone()),
+                backup_receipt_acl_safe: true,
+                warnings: vec![],
+            },
+            "disk-source",
+            500,
+        );
+        assert_eq!(
+            evidence.backup_evidence_state,
+            BackupEvidenceState::Verified
+        );
+
+        let unsafe_evidence = convert_evidence(
+            PowerShellSafetyEvidence {
+                external_power_state: "connected".to_owned(),
+                pending_restart_state: "clear".to_owned(),
+                backup_receipt: Some(receipt),
+                backup_receipt_acl_safe: false,
+                warnings: vec![],
+            },
+            "disk-source",
+            500,
+        );
+        assert_eq!(
+            unsafe_evidence.backup_evidence_state,
+            BackupEvidenceState::Unknown
+        );
     }
 }

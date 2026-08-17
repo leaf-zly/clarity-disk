@@ -237,6 +237,12 @@ impl PrivilegedWorkflow {
         events
     }
 
+    /// Clears terminal privileged audit summaries without touching recovery journals.
+    pub(crate) fn clear_audit_events(&self) -> Result<(), String> {
+        write_json(&self.audit_path, &Vec::<PrivilegedAuditEvent>::new())
+            .map_err(|error| error.to_string())
+    }
+
     fn issue_challenge(
         &self,
         operation: PrivilegedOperation,

@@ -13,11 +13,14 @@ use clarity_core::{
     AuditEvent, AuditEventKind, CLEANUP_CONFIRMATION_PHRASE, CleanupExecutionChallenge,
     CleanupExecutionItemResult, CleanupExecutionItemStatus, CleanupExecutionMode,
     CleanupExecutionReport, CleanupPlan, CleanupPreview, ExecuteCleanupRequest,
-    PrepareCleanupExecutionRequest, PrepareCleanupPlanRequest, QuarantineEntryStatus,
-    QuarantineIndex, QuarantineRestoreBatchReport, QuarantineRestoreResult,
+    ExecuteQuarantineDeletionRequest, PrepareCleanupExecutionRequest, PrepareCleanupPlanRequest,
+    PrepareQuarantineDeletionRequest, QUARANTINE_DELETE_CONFIRMATION_PHRASE,
+    QuarantineDeletionChallenge, QuarantineDeletionReport, QuarantineDeletionResult,
+    QuarantineEntryStatus, QuarantineIndex, QuarantineRestoreBatchReport, QuarantineRestoreResult,
     RECYCLE_BIN_CONFIRMATION_PHRASE, RestoreQuarantineBatchRequest, RestoreQuarantineRequest,
-    UpdateQuarantinePolicyRequest,
+    RestoreQuarantineToRequest, UpdateQuarantinePolicyRequest,
 };
+use sha2::{Digest, Sha256};
 
 const EXECUTION_CHALLENGE_TTL_MS: u64 = 2 * 60 * 1000;
 
@@ -26,11 +29,16 @@ struct PendingExecution {
     plan: CleanupPlan,
 }
 
+struct PendingDeletion {
+    challenge: QuarantineDeletionChallenge,
+}
+
 /// Owns the latest in-memory snapshots and privacy-preserving local stores.
 pub(crate) struct CleanupWorkflow {
     latest_preview: Mutex<Option<CleanupPreview>>,
     latest_plan: Mutex<Option<CleanupPlan>>,
     pending_executions: Mutex<HashMap<String, PendingExecution>>,
+    pending_deletions: Mutex<HashMap<String, PendingDeletion>>,
     audit: AuditStore,
     quarantine: QuarantineStore,
 }
@@ -41,6 +49,7 @@ impl Default for CleanupWorkflow {
             latest_preview: Mutex::new(None),
             latest_plan: Mutex::new(None),
             pending_executions: Mutex::new(HashMap::new()),
+            pending_deletions: Mutex::new(HashMap::new()),
             audit: AuditStore::default(),
             quarantine: QuarantineStore::default(),
         }
@@ -381,6 +390,165 @@ impl CleanupWorkflow {
         })
     }
 
+    /// Restores one backend entry to an enumerated user folder without accepting a path.
+    pub(crate) fn restore_to(
+        &self,
+        request: &RestoreQuarantineToRequest,
+    ) -> Result<QuarantineRestoreResult, String> {
+        let index = self
+            .quarantine
+            .get()
+            .ok_or_else(|| "隔离区索引不存在".to_owned())?;
+        let entry = index
+            .entries
+            .iter()
+            .find(|entry| entry.entry_id == request.entry_id)
+            .cloned()
+            .ok_or_else(|| "隔离区项目不存在".to_owned())?;
+        self.audit
+            .record(event_for_restore_start(&entry))
+            .map_err(|error| error.to_string())?;
+        let mut restoring = entry.clone();
+        restoring.status = QuarantineEntryStatus::Restoring;
+        self.quarantine
+            .replace_entry(restoring.clone())
+            .map_err(|error| error.to_string())?;
+        let (updated, result) = cleanup_executor::restore_entry_to(&restoring, request.destination)
+            .map_err(|error| error.to_string())?;
+        self.quarantine
+            .replace_entry(updated)
+            .map_err(|error| error.to_string())?;
+        let mut event = event_for_restore(&result, &entry);
+        event.kind = AuditEventKind::QuarantineAlternateRestoreCompleted;
+        self.audit
+            .record(event)
+            .map_err(|error| error.to_string())?;
+        Ok(result)
+    }
+
+    /// Issues a one-time challenge for bounded permanent quarantine deletion.
+    pub(crate) fn prepare_deletion(
+        &self,
+        request: &PrepareQuarantineDeletionRequest,
+    ) -> Result<QuarantineDeletionChallenge, String> {
+        validate_entry_ids(&request.entry_ids)?;
+        let entries = selected_entries(
+            self.quarantine
+                .get()
+                .ok_or_else(|| "隔离区索引不存在".to_owned())?,
+            &request.entry_ids,
+        )?;
+        if entries.iter().any(|entry| {
+            !matches!(
+                entry.status,
+                QuarantineEntryStatus::Staged
+                    | QuarantineEntryStatus::Expired
+                    | QuarantineEntryStatus::RestoreConflict
+                    | QuarantineEntryStatus::CopyVerified
+            )
+        }) {
+            return Err("选择包含不可永久删除的隔离区状态".to_owned());
+        }
+        let (authorization_id, confirmation_token) = execution_credentials()?;
+        let challenge = QuarantineDeletionChallenge {
+            authorization_id: authorization_id.clone(),
+            entry_ids: request.entry_ids.clone(),
+            selection_digest: deletion_digest(&entries)?,
+            confirmation_token,
+            confirmation_phrase: QUARANTINE_DELETE_CONFIRMATION_PHRASE.to_owned(),
+            expires_at_unix_ms: unix_ms().saturating_add(EXECUTION_CHALLENGE_TTL_MS),
+        };
+        self.audit
+            .record(deletion_event(
+                AuditEventKind::QuarantineDeletionConfirmationIssued,
+                &challenge,
+                entries
+                    .iter()
+                    .map(|entry| entry.bytes)
+                    .fold(0_u64, u64::saturating_add),
+                "永久删除选择已重新校验并签发一次性确认",
+            ))
+            .map_err(|error| error.to_string())?;
+        self.pending_deletions
+            .lock()
+            .expect("quarantine deletion state poisoned")
+            .insert(
+                authorization_id,
+                PendingDeletion {
+                    challenge: challenge.clone(),
+                },
+            );
+        Ok(challenge)
+    }
+
+    /// Consumes a deletion challenge and permanently removes only revalidated entries.
+    pub(crate) fn execute_deletion(
+        &self,
+        request: &ExecuteQuarantineDeletionRequest,
+    ) -> Result<QuarantineDeletionReport, String> {
+        let pending = self
+            .pending_deletions
+            .lock()
+            .expect("quarantine deletion state poisoned")
+            .remove(&request.authorization_id)
+            .ok_or_else(|| "永久删除确认不存在、已使用或已过期".to_owned())?;
+        validate_deletion_confirmation(&pending.challenge, request)?;
+        let entries = selected_entries(
+            self.quarantine
+                .get()
+                .ok_or_else(|| "隔离区索引不存在".to_owned())?,
+            &pending.challenge.entry_ids,
+        )?;
+        if deletion_digest(&entries)? != pending.challenge.selection_digest {
+            return Err("隔离区状态已变化，请重新确认永久删除".to_owned());
+        }
+        self.audit
+            .record(deletion_event(
+                AuditEventKind::QuarantineDeletionStarted,
+                &pending.challenge,
+                entries
+                    .iter()
+                    .map(|entry| entry.bytes)
+                    .fold(0_u64, u64::saturating_add),
+                "一次性确认已消费，即将删除应用隔离区中的已校验对象",
+            ))
+            .map_err(|error| error.to_string())?;
+        let mut results = Vec::with_capacity(entries.len());
+        let mut deleted_bytes = 0_u64;
+        for entry in entries {
+            match cleanup_executor::permanently_delete_entry(&entry) {
+                Ok((updated, result)) => {
+                    self.quarantine
+                        .replace_entry(updated)
+                        .map_err(|error| error.to_string())?;
+                    deleted_bytes = deleted_bytes.saturating_add(entry.bytes);
+                    results.push(result);
+                }
+                Err(error) => results.push(QuarantineDeletionResult {
+                    entry_id: entry.entry_id,
+                    status: entry.status,
+                    reason: format!("安全校验失败，未删除：{error}"),
+                }),
+            }
+        }
+        self.audit
+            .record(deletion_event(
+                AuditEventKind::QuarantineDeletionCompleted,
+                &pending.challenge,
+                deleted_bytes,
+                "永久删除已完成；失败项目保持原状态",
+            ))
+            .map_err(|error| error.to_string())?;
+        Ok(QuarantineDeletionReport {
+            results,
+            deleted_bytes,
+            index: self
+                .quarantine
+                .get()
+                .ok_or_else(|| "隔离区索引不存在".to_owned())?,
+        })
+    }
+
     /// Updates the fixed-tier quarantine policy without deleting content.
     pub(crate) fn update_policy(
         &self,
@@ -412,6 +580,11 @@ impl CleanupWorkflow {
     /// Returns newest privacy-preserving cleanup audit events.
     pub(crate) fn audit_events(&self) -> Vec<AuditEvent> {
         self.audit.events()
+    }
+
+    /// Clears cleanup audit history without changing quarantine recovery state.
+    pub(crate) fn clear_audit_events(&self) -> Result<(), String> {
+        self.audit.clear().map_err(|error| error.to_string())
     }
 
     /// Returns the latest quarantine index with preserved recovery records.
@@ -602,6 +775,78 @@ fn batch_event(
         total_bytes: 0,
         rule_ids: vec![],
     }
+}
+
+fn validate_entry_ids(entry_ids: &[String]) -> Result<(), String> {
+    if entry_ids.is_empty() || entry_ids.len() > 100 {
+        return Err("永久删除必须选择 1 到 100 个项目".to_owned());
+    }
+    let unique: std::collections::HashSet<_> = entry_ids.iter().collect();
+    if unique.len() != entry_ids.len() || entry_ids.iter().any(|id| id.trim().is_empty()) {
+        return Err("永久删除项目标识不能为空或重复".to_owned());
+    }
+    Ok(())
+}
+
+fn selected_entries(
+    index: QuarantineIndex,
+    entry_ids: &[String],
+) -> Result<Vec<clarity_core::QuarantineEntry>, String> {
+    entry_ids
+        .iter()
+        .map(|entry_id| {
+            index
+                .entries
+                .iter()
+                .find(|entry| entry.entry_id == *entry_id)
+                .cloned()
+                .ok_or_else(|| format!("隔离区项目不存在：{entry_id}"))
+        })
+        .collect()
+}
+
+fn deletion_digest(entries: &[clarity_core::QuarantineEntry]) -> Result<String, String> {
+    let encoded =
+        serde_json::to_vec(entries).map_err(|error| format!("无法绑定永久删除选择：{error}"))?;
+    Ok(Sha256::digest(encoded)
+        .iter()
+        .fold(String::with_capacity(64), |mut output, byte| {
+            write!(output, "{byte:02x}").expect("writing to a String cannot fail");
+            output
+        }))
+}
+
+fn deletion_event(
+    kind: AuditEventKind,
+    challenge: &QuarantineDeletionChallenge,
+    bytes: u64,
+    reason: &str,
+) -> AuditEvent {
+    AuditEvent {
+        event_id: format!("audit-delete-{:?}-{}", kind, unix_ms()),
+        kind,
+        subject_id: challenge.authorization_id.clone(),
+        occurred_at_unix_ms: unix_ms(),
+        reason: Some(reason.to_owned()),
+        candidate_count: challenge.entry_ids.len() as u64,
+        total_bytes: bytes,
+        rule_ids: vec![],
+    }
+}
+
+fn validate_deletion_confirmation(
+    challenge: &QuarantineDeletionChallenge,
+    request: &ExecuteQuarantineDeletionRequest,
+) -> Result<(), String> {
+    if unix_ms() > challenge.expires_at_unix_ms {
+        return Err("永久删除确认已过期，请重新准备".to_owned());
+    }
+    if request.confirmation_token != challenge.confirmation_token
+        || request.confirmation_phrase != challenge.confirmation_phrase
+    {
+        return Err("永久删除令牌或确认文字不匹配".to_owned());
+    }
+    Ok(())
 }
 
 fn validate_confirmation(

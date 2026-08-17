@@ -211,6 +211,14 @@ pub enum AuditEventKind {
     QuarantineBatchRestoreCompleted,
     /// The restricted quarantine retention or capacity policy changed.
     QuarantinePolicyUpdated,
+    /// A one-time quarantine deletion challenge was issued.
+    QuarantineDeletionConfirmationIssued,
+    /// Permanent deletion began after durable audit persistence.
+    QuarantineDeletionStarted,
+    /// A bounded permanent deletion finished with per-entry results.
+    QuarantineDeletionCompleted,
+    /// Restoration to a reviewed user folder completed or stopped on conflict.
+    QuarantineAlternateRestoreCompleted,
 }
 
 /// Minimal, privacy-preserving audit record for cleanup safety decisions.
@@ -257,6 +265,8 @@ pub enum QuarantineEntryStatus {
     Restoring,
     /// Retention elapsed; content remains recoverable and is not auto-deleted.
     Expired,
+    /// Content was explicitly and permanently removed from quarantine.
+    PermanentlyDeleted,
 }
 
 /// Transfer strategy used for a quarantine entry.
@@ -531,6 +541,31 @@ pub struct RestoreQuarantineBatchRequest {
     pub entry_ids: Vec<String>,
 }
 
+/// Reviewed destinations for conflict-safe quarantine restoration.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum QuarantineRestoreDestination {
+    /// Restore to the original allow-listed location.
+    #[default]
+    Original,
+    /// Restore beneath the current user's desktop.
+    Desktop,
+    /// Restore beneath the current user's documents directory.
+    Documents,
+    /// Restore beneath the current user's downloads directory.
+    Downloads,
+}
+
+/// Request to restore one entry to a reviewed backend-resolved destination.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreQuarantineToRequest {
+    /// Backend-owned quarantine entry identity.
+    pub entry_id: String,
+    /// Enumerated destination; arbitrary paths are not accepted.
+    pub destination: QuarantineRestoreDestination,
+}
+
 /// Result of a conflict-safe quarantine restoration attempt.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -553,11 +588,75 @@ pub struct QuarantineRestoreBatchReport {
     pub index: QuarantineIndex,
 }
 
+/// Request to prepare permanent deletion for bounded backend entry identities.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrepareQuarantineDeletionRequest {
+    /// One to 100 unique backend-owned entry IDs.
+    pub entry_ids: Vec<String>,
+}
+
+/// Short-lived challenge for an irreversible quarantine deletion.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuarantineDeletionChallenge {
+    /// Backend authorization identity.
+    pub authorization_id: String,
+    /// Entry identities bound to this challenge.
+    pub entry_ids: Vec<String>,
+    /// Digest of the selected current quarantine metadata.
+    pub selection_digest: String,
+    /// Opaque one-time token.
+    pub confirmation_token: String,
+    /// Exact localized irreversible-operation phrase.
+    pub confirmation_phrase: String,
+    /// Time after which the selection must be prepared again.
+    pub expires_at_unix_ms: u64,
+}
+
+/// Consumes one prepared quarantine deletion challenge.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecuteQuarantineDeletionRequest {
+    /// Backend-issued authorization identity.
+    pub authorization_id: String,
+    /// Backend-issued one-time token.
+    pub confirmation_token: String,
+    /// Exact phrase displayed by the confirmation UI.
+    pub confirmation_phrase: String,
+}
+
+/// Per-entry result for permanent quarantine deletion.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuarantineDeletionResult {
+    /// Backend-owned entry identity.
+    pub entry_id: String,
+    /// Final persisted state.
+    pub status: QuarantineEntryStatus,
+    /// Privacy-safe outcome message.
+    pub reason: String,
+}
+
+/// Terminal report for a consumed permanent deletion challenge.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuarantineDeletionReport {
+    /// Per-entry results in preparation order.
+    pub results: Vec<QuarantineDeletionResult>,
+    /// Bytes removed from application-owned quarantine.
+    pub deleted_bytes: u64,
+    /// Latest persisted quarantine index.
+    pub index: QuarantineIndex,
+}
+
 const PLAN_TTL_MS: u64 = 10 * 60 * 1000;
 /// Exact phrase required by the first restricted execution workflow.
 pub const CLEANUP_CONFIRMATION_PHRASE: &str = "确认移入隔离区";
 /// Exact phrase required before permanently emptying Windows Recycle Bin.
 pub const RECYCLE_BIN_CONFIRMATION_PHRASE: &str = "确认永久清空回收站";
+/// Exact phrase required before permanently deleting quarantine entries.
+pub const QUARANTINE_DELETE_CONFIRMATION_PHRASE: &str = "确认永久删除隔离项目";
 
 impl CleanupPlan {
     /// Builds a deterministic, non-authorizing plan from default-selected items.

@@ -2,7 +2,7 @@
 
 澄盘是一款以安全为第一原则的 Windows 磁盘空间分析、系统清理和分区管理工具。项目采用 Rust 领域核心、Tauri 桌面运行时与 Vue 3 界面。
 
-> 当前状态：计划一至计划七及 F11 磁盘健康只读版的已评审范围已接入。应用支持只读空间扫描、版本化清理预览、四类缓存隔离与恢复、回收站官方 API、物理磁盘拓扑、分区合并可行性预演、磁盘健康检测，以及分区不可变安全计划与恢复协议；Windows Update 管理员维护、隔离区永久删除和任何分区写操作均未开放。
+> 当前状态：F01–F18 与计划十至十三的工程范围已接入。除原有扫描、清理、管理员维护、磁盘健康和分区安全能力外，现已具备独立备份恢复凭据、恢复中心、活动历史、版本化设置、只读自动维护、更新检查、隐私诊断、性能基线和 GitHub Authenticode 发布门禁。真实分区写操作仍受外部证据和双重功能门禁约束，默认关闭。
 
 ## 设计目标
 
@@ -40,7 +40,10 @@
     docs/decisions/         架构决策记录
     docs/security/          权限与破坏性操作规范
     docs/release/           CI/CD 与发布规范
+    scripts/backup/         独立备份恢复验证工具
+    scripts/lab/            可销毁 VHDX 故障演练工具
+    scripts/release/        GitHub Runner 安装验证工具
 
 ## 安全说明
 
-当前版本只在固定允许根内执行可恢复隔离，并可通过独立确认调用 Windows 回收站官方 API。分区功能完全只读；计划七可以生成摘要绑定的安全计划并评估供电、待重启、备份和恢复协议，但始终不授权执行。详细边界见 [分区写操作威胁模型](docs/security/partition-write-threat-model.md)。所有未来高权限操作都必须遵循 [特权操作安全规范](docs/security/privileged-operations.md)。
+普通清理只在固定允许根内执行可恢复隔离；永久删除仅作用于后端索引的应用隔离对象，并要求一次性确认。分区执行代码具备编译期、管理员运行时、独立备份恢复凭据、供电/重启/健康/加密/VSS/容量和恢复日志多重门禁。详细边界见 [分区写操作威胁模型](docs/security/partition-write-threat-model.md)、[备份与故障演练](docs/security/backup-and-destructive-lab.md)和 [特权操作安全规范](docs/security/privileged-operations.md)。

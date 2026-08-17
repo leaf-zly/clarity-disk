@@ -186,7 +186,9 @@ fn recompute(index: &mut QuarantineIndex) {
         .filter(|entry| {
             !matches!(
                 entry.status,
-                QuarantineEntryStatus::PreviewOnly | QuarantineEntryStatus::Restored
+                QuarantineEntryStatus::PreviewOnly
+                    | QuarantineEntryStatus::Restored
+                    | QuarantineEntryStatus::PermanentlyDeleted
             )
         })
         .map(|entry| entry.bytes)

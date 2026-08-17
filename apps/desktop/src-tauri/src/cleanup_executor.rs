@@ -6,8 +6,9 @@ use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use clarity_core::{
-    CleanupCandidate, CleanupExecutionItemResult, CleanupExecutionItemStatus, QuarantineEntry,
-    QuarantineEntryStatus, QuarantineRestoreResult, QuarantineTransferKind,
+    CleanupCandidate, CleanupExecutionItemResult, CleanupExecutionItemStatus,
+    QuarantineDeletionResult, QuarantineEntry, QuarantineEntryStatus, QuarantineRestoreDestination,
+    QuarantineRestoreResult, QuarantineTransferKind,
 };
 use sha2::{Digest, Sha256};
 
@@ -268,6 +269,120 @@ pub(crate) fn restore_entry(
         &allowed_roots(&entry.rule_id),
         false,
     )
+}
+
+/// Restores one entry to a reviewed user folder resolved entirely by Rust.
+///
+/// The command surface accepts only an enum. No UI-authored destination path
+/// reaches this filesystem boundary.
+///
+/// # Errors
+///
+/// Returns an error when the user profile, destination name, quarantine tree,
+/// or transfer cannot be validated safely.
+pub(crate) fn restore_entry_to(
+    entry: &QuarantineEntry,
+    destination: QuarantineRestoreDestination,
+) -> Result<(QuarantineEntry, QuarantineRestoreResult), CleanupExecutorError> {
+    if destination == QuarantineRestoreDestination::Original {
+        return restore_entry(entry);
+    }
+    let profile = std::env::var_os("USERPROFILE")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .ok_or(CleanupExecutorError::UserProfileUnavailable)?;
+    let folder = match destination {
+        QuarantineRestoreDestination::Desktop => "Desktop",
+        QuarantineRestoreDestination::Documents => "Documents",
+        QuarantineRestoreDestination::Downloads => "Downloads",
+        QuarantineRestoreDestination::Original => unreachable!(),
+    };
+    let base = profile.join(folder).join("Clarity Disk Restored");
+    let name = Path::new(&entry.original_path)
+        .file_name()
+        .filter(|name| !name.is_empty())
+        .ok_or(CleanupExecutorError::UnsafeRestoreDestination)?;
+    let destination_path = base.join(name);
+    if !is_clean_absolute(&profile)
+        || !is_clean_absolute(&destination_path)
+        || !destination_path.starts_with(&profile)
+    {
+        return Err(CleanupExecutorError::UnsafeRestoreDestination);
+    }
+    fs::create_dir_all(&base).map_err(CleanupExecutorError::CreateRestoreParent)?;
+    if !path_chain_is_safe(&base).map_err(CleanupExecutorError::ReadPathMetadata)? {
+        return Err(CleanupExecutorError::UnsafeRestoreDestination);
+    }
+    let mut rerouted = entry.clone();
+    rerouted.original_path = destination_path.to_string_lossy().into_owned();
+    let (updated, mut result) = restore_entry_at(
+        &rerouted,
+        &quarantine_root()?,
+        std::slice::from_ref(&base),
+        false,
+    )?;
+    if result.status == QuarantineEntryStatus::Restored {
+        result.reason = format!("已恢复到受控目标：{folder}/Clarity Disk Restored");
+    }
+    Ok((updated, result))
+}
+
+/// Permanently removes one backend-owned entry from application quarantine.
+///
+/// # Errors
+///
+/// Returns an error unless the stored object is in a deletable state, remains
+/// beneath the fixed quarantine root, and contains no reparse points.
+pub(crate) fn permanently_delete_entry(
+    entry: &QuarantineEntry,
+) -> Result<(QuarantineEntry, QuarantineDeletionResult), CleanupExecutorError> {
+    permanently_delete_entry_at(entry, &quarantine_root()?)
+}
+
+fn permanently_delete_entry_at(
+    entry: &QuarantineEntry,
+    root: &Path,
+) -> Result<(QuarantineEntry, QuarantineDeletionResult), CleanupExecutorError> {
+    if !matches!(
+        entry.status,
+        QuarantineEntryStatus::Staged
+            | QuarantineEntryStatus::Expired
+            | QuarantineEntryStatus::RestoreConflict
+            | QuarantineEntryStatus::CopyVerified
+    ) {
+        return Err(CleanupExecutorError::EntryNotStaged);
+    }
+    let path = entry
+        .quarantine_path
+        .as_deref()
+        .map(PathBuf::from)
+        .ok_or(CleanupExecutorError::MissingQuarantinePath)?;
+    if !is_clean_absolute(root)
+        || !is_clean_absolute(&path)
+        || path == root
+        || !path.starts_with(root)
+        || !path_chain_is_safe(&path).map_err(CleanupExecutorError::ReadQuarantineMetadata)?
+    {
+        return Err(CleanupExecutorError::UnsafeQuarantinePath);
+    }
+    let metadata =
+        fs::symlink_metadata(&path).map_err(CleanupExecutorError::ReadQuarantineMetadata)?;
+    if !tree_is_safe(&path, &metadata) {
+        return Err(CleanupExecutorError::UnsafeQuarantinePath);
+    }
+    remove_tree(&path, &metadata).map_err(CleanupExecutorError::PermanentDelete)?;
+    let mut updated = entry.clone();
+    updated.status = QuarantineEntryStatus::PermanentlyDeleted;
+    updated.quarantine_path = None;
+    updated.transaction_path = None;
+    Ok((
+        updated,
+        QuarantineDeletionResult {
+            entry_id: entry.entry_id.clone(),
+            status: QuarantineEntryStatus::PermanentlyDeleted,
+            reason: "已从应用隔离区永久删除".to_owned(),
+        },
+    ))
 }
 
 fn restore_entry_at(
@@ -654,6 +769,10 @@ pub(crate) enum CleanupExecutorError {
     CreateRestoreParent(std::io::Error),
     #[error("quarantine entry could not be restored: {0}")]
     RestoreMove(std::io::Error),
+    #[error("USERPROFILE is unavailable; alternate restoration is disabled")]
+    UserProfileUnavailable,
+    #[error("quarantine entry could not be permanently deleted: {0}")]
+    PermanentDelete(std::io::Error),
     #[error("SystemDrive is unavailable")]
     SystemDriveUnavailable,
     #[error("Windows Recycle Bin API failed with HRESULT {0}")]
@@ -665,7 +784,7 @@ pub(crate) enum CleanupExecutorError {
 
 #[cfg(test)]
 mod tests {
-    use super::{restore_entry_at, stage_candidate_at};
+    use super::{permanently_delete_entry_at, restore_entry_at, stage_candidate_at};
     use crate::quarantine_store::QuarantineStore;
     use clarity_core::{CleanupCandidate, QuarantineEntryStatus, RecoveryStrategy, SuggestionRisk};
     use std::fs;
@@ -748,6 +867,25 @@ mod tests {
             restore_entry_at(&entry, &quarantine, std::slice::from_ref(&source), false).unwrap();
         assert_eq!(result.status, QuarantineEntryStatus::RestoreConflict);
         assert_eq!(fs::read(source.join("one.tmp")).unwrap(), b"new");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn permanent_deletion_is_scoped_to_the_application_quarantine_root() {
+        let root = test_root("permanent-delete");
+        let source = root.join("source");
+        let quarantine = root.join("quarantine");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("one.tmp"), b"data").unwrap();
+        let store = QuarantineStore::with_path(root.join("state/index.json"));
+        stage_candidate_at("plan-1", &candidate(&source), &store, &quarantine, false).unwrap();
+        let entry = store.get().unwrap().entries[0].clone();
+        let stored_path = PathBuf::from(entry.quarantine_path.as_ref().unwrap());
+
+        let (updated, result) = permanently_delete_entry_at(&entry, &quarantine).unwrap();
+        assert_eq!(updated.status, QuarantineEntryStatus::PermanentlyDeleted);
+        assert_eq!(result.status, QuarantineEntryStatus::PermanentlyDeleted);
+        assert!(!stored_path.exists());
         let _ = fs::remove_dir_all(root);
     }
 

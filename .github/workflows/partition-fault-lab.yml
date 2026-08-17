@@ -1,0 +1,85 @@
+name: Destructive partition fault lab
+
+on:
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: Recovery interruption checkpoint to exercise
+        required: true
+        type: choice
+        options:
+          - before-mutation
+          - after-mutation
+          - verification-failure
+      acknowledgement:
+        description: Type RUN DISPOSABLE VHDX LAB
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: destructive-partition-lab
+  cancel-in-progress: false
+
+jobs:
+  disposable-vhdx:
+    if: inputs.acknowledgement == 'RUN DISPOSABLE VHDX LAB'
+    runs-on: [self-hosted, windows, clarity-disk-destructive-lab]
+    timeout-minutes: 30
+    env:
+      LAB_RUN_ID: github-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.97.0
+
+      - name: Require dedicated marked lab root
+        shell: pwsh
+        run: |
+          if (-not $env:CLARITY_DISK_DESTRUCTIVE_LAB_ROOT) { throw 'Dedicated lab root is not configured.' }
+          $marker = Join-Path $env:CLARITY_DISK_DESTRUCTIVE_LAB_ROOT 'ALLOW-CLARITY-DISK-DESTRUCTIVE-LAB'
+          if (-not (Test-Path -LiteralPath $marker -PathType Leaf)) { throw 'Dedicated lab marker is missing.' }
+
+      - name: Create disposable VHDX topology
+        shell: pwsh
+        run: |
+          .\scripts\lab\New-PartitionFaultLab.ps1 -LabRoot $env:CLARITY_DISK_DESTRUCTIVE_LAB_ROOT -RunId $env:LAB_RUN_ID
+
+      - name: Exercise recovery state and fault-injection tests
+        shell: pwsh
+        env:
+          CLARITY_DISK_FAULT_SCENARIO: ${{ inputs.scenario }}
+        run: |
+          cargo test --locked -p clarity-core partition_safety -- --nocapture
+          cargo test --locked -p clarity-privileged-service --features partition-writes partition -- --nocapture
+
+      - name: Capture recovery evidence
+        if: always()
+        shell: pwsh
+        run: |
+          $source = Join-Path (Join-Path $env:CLARITY_DISK_DESTRUCTIVE_LAB_ROOT $env:LAB_RUN_ID) 'lab-state.json'
+          if (Test-Path -LiteralPath $source) {
+            Copy-Item -LiteralPath $source -Destination (Join-Path $env:RUNNER_TEMP 'partition-fault-lab-state.json')
+          }
+
+      - name: Upload recovery evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: partition-fault-lab-${{ github.run_id }}
+          path: ${{ runner.temp }}\partition-fault-lab-state.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Remove disposable VHDX topology
+        if: always()
+        shell: pwsh
+        run: |
+          $state = Join-Path (Join-Path $env:CLARITY_DISK_DESTRUCTIVE_LAB_ROOT $env:LAB_RUN_ID) 'lab-state.json'
+          if (Test-Path -LiteralPath $state) {
+            .\scripts\lab\Remove-PartitionFaultLab.ps1 -LabRoot $env:CLARITY_DISK_DESTRUCTIVE_LAB_ROOT -RunId $env:LAB_RUN_ID
+          }

@@ -1,14 +1,35 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { onBeforeUnmount, onMounted, ref } from "vue";
 
 import AppSidebar from "@/components/AppSidebar.vue";
 import DashboardPage from "@/pages/DashboardPage.vue";
+import ActivityHistoryPage from "@/pages/ActivityHistoryPage.vue";
 import DiskHealthPage from "@/pages/DiskHealthPage.vue";
 import PartitionSafetyPage from "@/pages/PartitionSafetyPage.vue";
 import PartitionPreviewPage from "@/pages/PartitionPreviewPage.vue";
 import SystemMaintenancePage from "@/pages/SystemMaintenancePage.vue";
+import RecoveryCenterPage from "@/pages/RecoveryCenterPage.vue";
+import SettingsPage from "@/pages/SettingsPage.vue";
+import { runAutomaticMaintenance } from "@/services/operations-service";
 
 const activeSection = ref("overview");
+let maintenanceTimer: ReturnType<typeof setInterval> | undefined;
+
+onMounted(() => {
+  void runAutomaticMaintenance().catch(() => {
+    // Unknown power/update/backup evidence safely blocks the read-only tick.
+  });
+  maintenanceTimer = setInterval(
+    () => {
+      void runAutomaticMaintenance().catch(() => undefined);
+    },
+    15 * 60 * 1000,
+  );
+});
+
+onBeforeUnmount(() => {
+  if (maintenanceTimer) clearInterval(maintenanceTimer);
+});
 </script>
 
 <template>
@@ -19,6 +40,9 @@ const activeSection = ref("overview");
       <DiskHealthPage v-else-if="activeSection === 'health'" />
       <PartitionSafetyPage v-else-if="activeSection === 'partition-safety'" />
       <SystemMaintenancePage v-else-if="activeSection === 'maintenance'" />
+      <RecoveryCenterPage v-else-if="activeSection === 'recovery'" />
+      <ActivityHistoryPage v-else-if="activeSection === 'history'" />
+      <SettingsPage v-else-if="activeSection === 'settings'" />
       <DashboardPage v-else />
     </main>
   </div>

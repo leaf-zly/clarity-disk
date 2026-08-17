@@ -189,6 +189,19 @@ impl SpaceScanManager {
         history.truncate(20);
         history
     }
+
+    /// Clears terminal scan summaries while leaving active tasks untouched.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the empty history document cannot be persisted.
+    pub fn clear_history(&self) -> Result<(), String> {
+        let mut history = self.history.lock().expect("space scan history poisoned");
+        crate::state_store::write_json(&self.history_path, &Vec::<SpaceScanHistoryEntry>::new())
+            .map_err(|error| error.to_string())?;
+        history.clear();
+        Ok(())
+    }
 }
 
 fn history_path() -> PathBuf {

@@ -433,7 +433,8 @@ impl CleanupWorkflow {
     ) -> Result<QuarantineDeletionChallenge, String> {
         validate_entry_ids(&request.entry_ids)?;
         let entries = selected_entries(
-            self.quarantine
+            &self
+                .quarantine
                 .get()
                 .ok_or_else(|| "隔离区索引不存在".to_owned())?,
             &request.entry_ids,
@@ -494,7 +495,8 @@ impl CleanupWorkflow {
             .ok_or_else(|| "永久删除确认不存在、已使用或已过期".to_owned())?;
         validate_deletion_confirmation(&pending.challenge, request)?;
         let entries = selected_entries(
-            self.quarantine
+            &self
+                .quarantine
                 .get()
                 .ok_or_else(|| "隔离区索引不存在".to_owned())?,
             &pending.challenge.entry_ids,
@@ -789,7 +791,7 @@ fn validate_entry_ids(entry_ids: &[String]) -> Result<(), String> {
 }
 
 fn selected_entries(
-    index: QuarantineIndex,
+    index: &QuarantineIndex,
     entry_ids: &[String],
 ) -> Result<Vec<clarity_core::QuarantineEntry>, String> {
     entry_ids

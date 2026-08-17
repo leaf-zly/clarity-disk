@@ -279,8 +279,10 @@ mod tests {
 
     #[test]
     fn ignored_roots_must_be_absolute_windows_paths() {
-        let mut settings = AppSettings::default();
-        settings.ignored_scan_roots = vec!["relative".to_owned()];
+        let mut settings = AppSettings {
+            ignored_scan_roots: vec!["relative".to_owned()],
+            ..AppSettings::default()
+        };
         assert_eq!(settings.validate(), Err(SettingsError::InvalidIgnoredRoot));
         settings.ignored_scan_roots = vec!["D:\\Projects".to_owned()];
         assert_eq!(settings.validate(), Ok(()));

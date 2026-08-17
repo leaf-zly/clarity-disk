@@ -5,7 +5,7 @@ use std::sync::Mutex;
 
 use clarity_core::AppSettings;
 
-use crate::state_store::{StateStoreError, load_json, state_path, write_json};
+use crate::state_store::{load_json, state_path, write_json};
 
 /// Thread-safe store that validates every settings replacement.
 pub(crate) struct SettingsStore {

@@ -18,10 +18,10 @@ repository = "https://github.com/leaf-zly/clarity-disk"
 [workspace.dependencies]
 clarity-core = { path = "crates/clarity-core" }
 clarity-privileged-protocol = { path = "crates/clarity-privileged-protocol" }
-getrandom = "0.3.4"
+getrandom = "0.4.3"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
-sha2 = "0.10.9"
+sha2 = "0.11.0"
 tauri = "2.11.5"
 thiserror = "2.0.20"
 

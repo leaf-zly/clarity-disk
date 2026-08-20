@@ -215,6 +215,9 @@ pub fn discover_partition_topology() -> Result<PartitionTopology, PartitionDisco
 
 #[cfg(windows)]
 fn discover_windows_partition_topology() -> Result<PartitionTopology, PartitionDiscoveryError> {
+    if let Ok(native_envelope) = native_partition_discovery::discover() {
+        return convert_topology(native_envelope);
+    }
     let powershell = powershell_path()?;
     let run_provider = |script: &'static str| {
         crate::windows_process::hide_console_window(&mut Command::new(&powershell))
@@ -485,27 +488,27 @@ fn non_empty(value: Option<String>) -> Option<String> {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct PowerShellTopologyEnvelope {
-    disks: Vec<PowerShellDisk>,
+pub(super) struct PowerShellTopologyEnvelope {
+    pub(super) disks: Vec<PowerShellDisk>,
     #[serde(default)]
-    warnings: Vec<String>,
+    pub(super) warnings: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct PowerShellDisk {
-    id: String,
-    number: u32,
-    friendly_name: String,
-    bus_type: String,
-    partition_style: String,
-    size_bytes: u64,
-    layout_kind: String,
-    health: String,
-    media_error_state: String,
-    is_offline: bool,
+pub(super) struct PowerShellDisk {
+    pub(super) id: String,
+    pub(super) number: u32,
+    pub(super) friendly_name: String,
+    pub(super) bus_type: String,
+    pub(super) partition_style: String,
+    pub(super) size_bytes: u64,
+    pub(super) layout_kind: String,
+    pub(super) health: String,
+    pub(super) media_error_state: String,
+    pub(super) is_offline: bool,
     #[serde(default)]
-    partitions: Vec<PowerShellPartition>,
+    pub(super) partitions: Vec<PowerShellPartition>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -513,28 +516,28 @@ struct PowerShellDisk {
 // The DTO mirrors independent provider flags. Domain conversion immediately
 // replaces them with typed state and protection enums.
 #[allow(clippy::struct_excessive_bools)]
-struct PowerShellPartition {
-    id: String,
-    disk_id: String,
-    partition_number: u32,
-    guid: Option<String>,
-    offset_bytes: u64,
-    size_bytes: u64,
-    gpt_type: Option<String>,
-    mbr_type: Option<String>,
-    file_system: Option<String>,
-    label: Option<String>,
+pub(super) struct PowerShellPartition {
+    pub(super) id: String,
+    pub(super) disk_id: String,
+    pub(super) partition_number: u32,
+    pub(super) guid: Option<String>,
+    pub(super) offset_bytes: u64,
+    pub(super) size_bytes: u64,
+    pub(super) gpt_type: Option<String>,
+    pub(super) mbr_type: Option<String>,
+    pub(super) file_system: Option<String>,
+    pub(super) label: Option<String>,
     #[serde(default)]
-    mount_points: Vec<String>,
-    is_system: bool,
-    is_boot: bool,
-    is_read_only: bool,
-    is_offline: bool,
-    encryption_state: String,
-    snapshot_state: String,
-    health: String,
-    used_bytes: Option<u64>,
-    free_bytes: Option<u64>,
+    pub(super) mount_points: Vec<String>,
+    pub(super) is_system: bool,
+    pub(super) is_boot: bool,
+    pub(super) is_read_only: bool,
+    pub(super) is_offline: bool,
+    pub(super) encryption_state: String,
+    pub(super) snapshot_state: String,
+    pub(super) health: String,
+    pub(super) used_bytes: Option<u64>,
+    pub(super) free_bytes: Option<u64>,
 }
 
 /// Errors produced by the read-only Windows storage provider adapter.
@@ -562,6 +565,9 @@ pub enum PartitionDiscoveryError {
     /// Provider returned no physical disks.
     #[error("no physical disks were returned by the storage provider")]
     NoPhysicalDisks,
+    /// The native read-only provider could not query a device safely.
+    #[error("native Windows storage provider failed: {0}")]
+    NativeProviderFailed(String),
     /// Partition offset plus capacity overflowed.
     #[error("partition capacity overflowed")]
     CapacityOverflow,

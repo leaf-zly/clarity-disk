@@ -13,6 +13,8 @@ mod cleanup_workflow;
 mod diagnostics;
 mod disk_discovery;
 mod disk_health_discovery;
+#[cfg(windows)]
+mod native_partition_discovery;
 mod partition_discovery;
 mod partition_safety_discovery;
 mod privileged_workflow;

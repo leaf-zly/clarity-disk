@@ -274,7 +274,7 @@ fn convert_native_health_disk(
         provider_health: ProviderHealthStatus::Unknown,
         smart_status: SmartHealthStatus::Unavailable,
         identity_mapping: IdentityMappingConfidence::DiskNumber,
-        temperature_celsius: None,
+        temperature_celsius: raw.temperature_celsius,
         temperature_max_celsius: None,
         wear_percent_used: None,
         power_on_hours: None,
@@ -282,8 +282,8 @@ fn convert_native_health_disk(
         read_errors_uncorrected: None,
         write_errors_total: None,
         write_errors_uncorrected: None,
-        logical_sector_bytes: None,
-        physical_sector_bytes: None,
+        logical_sector_bytes: raw.logical_sector_bytes,
+        physical_sector_bytes: raw.physical_sector_bytes,
         // The native descriptor provider does not enumerate mounted volumes;
         // one unknown entry prevents the UI from implying encryption is clear.
         encryption: DiskEncryptionSummary {

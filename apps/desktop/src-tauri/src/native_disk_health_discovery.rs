@@ -25,8 +25,10 @@ use windows_sys::Win32::{
         IO::DeviceIoControl,
         Ioctl::{
             GET_LENGTH_INFORMATION, IOCTL_DISK_GET_LENGTH_INFO, IOCTL_STORAGE_QUERY_PROPERTY,
-            PropertyStandardQuery, STORAGE_DEVICE_DESCRIPTOR, STORAGE_PROPERTY_QUERY,
-            StorageDeviceProperty,
+            PropertyStandardQuery, STORAGE_ACCESS_ALIGNMENT_DESCRIPTOR, STORAGE_DEVICE_DESCRIPTOR,
+            STORAGE_PROPERTY_QUERY, STORAGE_TEMPERATURE_DATA_DESCRIPTOR,
+            StorageAccessAlignmentProperty, StorageDeviceProperty,
+            StorageDeviceTemperatureProperty,
         },
     },
 };
@@ -57,6 +59,12 @@ pub(crate) struct NativeDiskHealth {
     pub(crate) media_type: String,
     /// Physical capacity in bytes.
     pub(crate) size_bytes: u64,
+    /// Logical sector size in bytes, when reported by Windows.
+    pub(crate) logical_sector_bytes: Option<u32>,
+    /// Physical sector size in bytes, when reported by Windows.
+    pub(crate) physical_sector_bytes: Option<u32>,
+    /// Current device temperature in Celsius, when reported by Windows.
+    pub(crate) temperature_celsius: Option<i16>,
 }
 
 /// Discovers physical disks using `CreateFileW` and storage IOCTLs.
@@ -73,12 +81,20 @@ pub(crate) fn discover() -> Result<Vec<NativeDiskHealth>, std::io::Error> {
         };
         let size = query_disk_size(handle);
         let descriptor = query_descriptor(handle).ok();
+        let alignment = query_alignment(handle).ok();
+        let temperature = query_temperature(handle).ok().flatten();
         unsafe { CloseHandle(handle) };
         let size_bytes = match size {
             Ok(value) if value > 0 => value,
             Ok(_) | Err(_) => continue,
         };
-        disks.push(build_disk(number, size_bytes, descriptor));
+        disks.push(build_disk(
+            number,
+            size_bytes,
+            descriptor,
+            alignment,
+            temperature,
+        ));
     }
     if disks.is_empty() {
         return Err(std::io::Error::new(
@@ -103,6 +119,8 @@ fn build_disk(
     number: u32,
     size_bytes: u64,
     descriptor: Option<NativeDescriptor>,
+    alignment: Option<(u32, u32)>,
+    temperature_celsius: Option<i16>,
 ) -> NativeDiskHealth {
     let descriptor = descriptor.unwrap_or_else(|| NativeDescriptor {
         vendor: None,
@@ -131,6 +149,9 @@ fn build_disk(
             "Unknown".to_owned()
         },
         size_bytes,
+        logical_sector_bytes: alignment.map(|value| value.0),
+        physical_sector_bytes: alignment.map(|value| value.1),
+        temperature_celsius,
     }
 }
 
@@ -223,6 +244,53 @@ fn query_descriptor(handle: HANDLE) -> Result<NativeDescriptor, std::io::Error> 
         bus_type: bus_type_name(descriptor.BusType),
         removable: descriptor.RemovableMedia,
     })
+}
+
+fn query_alignment(handle: HANDLE) -> Result<(u32, u32), std::io::Error> {
+    let mut alignment = STORAGE_ACCESS_ALIGNMENT_DESCRIPTOR::default();
+    if query_fixed_property(handle, StorageAccessAlignmentProperty, &mut alignment) {
+        if alignment.BytesPerLogicalSector > 0 && alignment.BytesPerPhysicalSector > 0 {
+            return Ok((
+                alignment.BytesPerLogicalSector,
+                alignment.BytesPerPhysicalSector,
+            ));
+        }
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::InvalidData,
+        "storage alignment descriptor is unavailable",
+    ))
+}
+
+fn query_temperature(handle: HANDLE) -> Result<Option<i16>, std::io::Error> {
+    let mut temperature = STORAGE_TEMPERATURE_DATA_DESCRIPTOR::default();
+    if !query_fixed_property(handle, StorageDeviceTemperatureProperty, &mut temperature) {
+        return Err(std::io::Error::last_os_error());
+    }
+    let value = temperature.TemperatureInfo[0].Temperature;
+    Ok((-50..=150).contains(&value).then_some(value))
+}
+
+fn query_fixed_property<T>(handle: HANDLE, property: i32, output: &mut T) -> bool {
+    let query = STORAGE_PROPERTY_QUERY {
+        PropertyId: property,
+        QueryType: PropertyStandardQuery,
+        ..Default::default()
+    };
+    let mut returned = 0_u32;
+    unsafe {
+        DeviceIoControl(
+            handle,
+            IOCTL_STORAGE_QUERY_PROPERTY,
+            (&raw const query).cast(),
+            u32::try_from(size_of::<STORAGE_PROPERTY_QUERY>())
+                .expect("storage property query size fits u32"),
+            std::ptr::addr_of_mut!(*output).cast(),
+            u32::try_from(size_of::<T>()).expect("storage property output size fits u32"),
+            &raw mut returned,
+            null_mut(),
+        ) != 0
+    }
 }
 
 fn descriptor_string(buffer: &[u8], returned: usize, offset: u32) -> Option<String> {

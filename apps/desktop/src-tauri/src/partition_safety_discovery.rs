@@ -1,8 +1,8 @@
 //! Read-only Windows evidence for partition-operation safety planning.
 //!
-//! The adapter runs one compile-time script from the trusted in-box
-//! Windows `PowerShell` path. It accepts no caller input and only reads power and
-//! pending-restart evidence.
+//! The normal path uses native power and registry APIs without starting a
+//! shell. The trusted in-box Windows `PowerShell` provider remains a fallback
+//! only when an ACL-protected backup receipt requires compatibility validation.
 
 use std::{
     path::PathBuf,
@@ -117,6 +117,16 @@ pub fn discover_partition_safety_evidence(
 fn discover_windows_partition_safety_evidence(
     source_disk_id: &str,
 ) -> Result<PartitionSafetyEvidence, PartitionSafetyDiscoveryError> {
+    if let Ok(native) = crate::native_partition_safety_discovery::discover() {
+        let raw = PowerShellSafetyEvidence {
+            external_power_state: native.external_power_state,
+            pending_restart_state: native.pending_restart_state,
+            backup_receipt: None,
+            backup_receipt_acl_safe: false,
+            warnings: native.warnings,
+        };
+        return Ok(convert_evidence(raw, source_disk_id, current_unix_ms()));
+    }
     let output = crate::windows_process::hide_console_window(&mut Command::new(powershell_path()?))
         .args([
             "-NoLogo",

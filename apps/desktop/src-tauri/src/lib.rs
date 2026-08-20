@@ -17,6 +17,8 @@ mod disk_health_discovery;
 mod native_disk_health_discovery;
 #[cfg(windows)]
 mod native_partition_discovery;
+#[cfg(windows)]
+mod native_partition_safety_discovery;
 mod partition_discovery;
 mod partition_safety_discovery;
 mod privileged_workflow;

@@ -39,19 +39,17 @@ pub(crate) struct NativeSafetyEvidence {
 pub(crate) fn discover() -> Result<NativeSafetyEvidence, std::io::Error> {
     ensure_backup_receipt_is_absent()?;
     let mut warnings = Vec::new();
-    let external_power_state = match external_power_state() {
-        Ok(value) => value,
-        Err(_) => {
-            warnings.push("无法读取系统供电状态，稳定供电检查保持阻塞。".to_owned());
-            "unknown".to_owned()
-        }
+    let external_power_state = if let Ok(value) = external_power_state() {
+        value
+    } else {
+        warnings.push("无法读取系统供电状态，稳定供电检查保持阻塞。".to_owned());
+        "unknown".to_owned()
     };
-    let pending_restart_state = match pending_restart_state() {
-        Ok(value) => value,
-        Err(_) => {
-            warnings.push("无法读取 Windows 待重启标记，重启检查保持阻塞。".to_owned());
-            "unknown".to_owned()
-        }
+    let pending_restart_state = if let Ok(value) = pending_restart_state() {
+        value
+    } else {
+        warnings.push("无法读取 Windows 待重启标记，重启检查保持阻塞。".to_owned());
+        "unknown".to_owned()
     };
     Ok(NativeSafetyEvidence {
         external_power_state,

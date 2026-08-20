@@ -3,6 +3,7 @@
 mod maintenance;
 mod partition;
 mod request_store;
+mod windows_process;
 
 use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};

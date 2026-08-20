@@ -244,28 +244,29 @@ $source=ReadPartition $sourceNumber; $target=ReadPartition $targetNumber
 [ordered]@{ diskId=$diskId; diskNumber=[uint32]$disk.Number; diskHealth=[string]$disk.HealthStatus; diskOffline=[bool]$disk.IsOffline; source=$source; target=$target; sourceRoot=($source.driveLetter+':\'); targetRoot=($target.driveLetter+':\') } | ConvertTo-Json -Depth 6 -Compress
 ";
     let powershell = trusted_system_executable(&["WindowsPowerShell", "v1.0", "powershell.exe"])?;
-    let output = std::process::Command::new(powershell)
-        .args([
-            "-NoLogo",
-            "-NoProfile",
-            "-NonInteractive",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            SCRIPT,
-        ])
-        .env("CLARITY_DISK_NUMBER", plan.disk_number.to_string())
-        .env(
-            "CLARITY_SOURCE_PARTITION_NUMBER",
-            plan.source_identity.partition_number.to_string(),
-        )
-        .env(
-            "CLARITY_TARGET_PARTITION_NUMBER",
-            plan.target_identity.partition_number.to_string(),
-        )
-        .stdin(std::process::Stdio::null())
-        .output()
-        .map_err(|error| format!("无法启动分区重新发现：{error}"))?;
+    let output =
+        crate::windows_process::hide_console_window(std::process::Command::new(powershell))
+            .args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                SCRIPT,
+            ])
+            .env("CLARITY_DISK_NUMBER", plan.disk_number.to_string())
+            .env(
+                "CLARITY_SOURCE_PARTITION_NUMBER",
+                plan.source_identity.partition_number.to_string(),
+            )
+            .env(
+                "CLARITY_TARGET_PARTITION_NUMBER",
+                plan.target_identity.partition_number.to_string(),
+            )
+            .stdin(std::process::Stdio::null())
+            .output()
+            .map_err(|error| format!("无法启动分区重新发现：{error}"))?;
     if !output.status.success() {
         return Err(format!(
             "分区重新发现失败：{}",
@@ -358,24 +359,25 @@ fn preflight_migration_tree(root: &std::path::Path) -> Result<(), String> {
 #[cfg(all(windows, feature = "partition-writes"))]
 fn run_robocopy(source: &std::path::Path, destination: &std::path::Path) -> Result<(), String> {
     let executable = trusted_system_executable(&["robocopy.exe"])?;
-    let output = std::process::Command::new(executable)
-        .arg(source)
-        .arg(destination)
-        .args([
-            "/E",
-            "/COPYALL",
-            "/DCOPY:DAT",
-            "/XJ",
-            "/B",
-            "/R:0",
-            "/W:0",
-            "/XD",
-            "System Volume Information",
-            "$RECYCLE.BIN",
-        ])
-        .stdin(std::process::Stdio::null())
-        .output()
-        .map_err(|error| format!("无法启动受信任的迁移工具：{error}"))?;
+    let output =
+        crate::windows_process::hide_console_window(std::process::Command::new(executable))
+            .arg(source)
+            .arg(destination)
+            .args([
+                "/E",
+                "/COPYALL",
+                "/DCOPY:DAT",
+                "/XJ",
+                "/B",
+                "/R:0",
+                "/W:0",
+                "/XD",
+                "System Volume Information",
+                "$RECYCLE.BIN",
+            ])
+            .stdin(std::process::Stdio::null())
+            .output()
+            .map_err(|error| format!("无法启动受信任的迁移工具：{error}"))?;
     let code = output.status.code().unwrap_or(i32::MAX);
     if code > 7 {
         return Err(format!(
@@ -473,11 +475,9 @@ Resize-Partition -InputObject $target -Size $supported.SizeMax -ErrorAction Stop
         .guid
         .as_deref()
         .ok_or_else(|| "目标分区 GUID 缺失。".to_owned())?;
-    let output = std::process::Command::new(trusted_system_executable(&[
-        "WindowsPowerShell",
-        "v1.0",
-        "powershell.exe",
-    ])?)
+    let output = crate::windows_process::hide_console_window(std::process::Command::new(
+        trusted_system_executable(&["WindowsPowerShell", "v1.0", "powershell.exe"])?,
+    ))
     .args([
         "-NoLogo",
         "-NoProfile",
@@ -541,11 +541,9 @@ fn verify_postconditions(
         target_size: u64,
         target_guid: String,
     }
-    let output = std::process::Command::new(trusted_system_executable(&[
-        "WindowsPowerShell",
-        "v1.0",
-        "powershell.exe",
-    ])?)
+    let output = crate::windows_process::hide_console_window(std::process::Command::new(
+        trusted_system_executable(&["WindowsPowerShell", "v1.0", "powershell.exe"])?,
+    ))
     .args([
         "-NoLogo",
         "-NoProfile",

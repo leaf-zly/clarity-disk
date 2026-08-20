@@ -193,7 +193,7 @@ pub fn discover_disk_health() -> Result<DiskHealthSnapshot, DiskHealthDiscoveryE
 fn discover_windows_disk_health() -> Result<DiskHealthSnapshot, DiskHealthDiscoveryError> {
     let powershell = powershell_path()?;
     let run_provider = |script: &'static str| {
-        Command::new(&powershell)
+        crate::windows_process::hide_console_window(Command::new(&powershell))
             .args([
                 "-NoLogo",
                 "-NoProfile",

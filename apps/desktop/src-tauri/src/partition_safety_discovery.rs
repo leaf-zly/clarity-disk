@@ -117,7 +117,7 @@ pub fn discover_partition_safety_evidence(
 fn discover_windows_partition_safety_evidence(
     source_disk_id: &str,
 ) -> Result<PartitionSafetyEvidence, PartitionSafetyDiscoveryError> {
-    let output = Command::new(powershell_path()?)
+    let output = crate::windows_process::hide_console_window(Command::new(powershell_path()?))
         .args([
             "-NoLogo",
             "-NoProfile",

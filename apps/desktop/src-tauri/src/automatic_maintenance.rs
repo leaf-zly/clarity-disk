@@ -181,7 +181,7 @@ fn discover_context() -> Result<DiscoveredMaintenanceContext, String> {
             .ok_or_else(|| "Windows SystemRoot is unavailable".to_owned())?;
         let powershell =
             PathBuf::from(system_root).join("System32/WindowsPowerShell/v1.0/powershell.exe");
-        let output = Command::new(powershell)
+        let output = crate::windows_process::hide_console_window(Command::new(powershell))
             .args([
                 "-NoLogo",
                 "-NoProfile",

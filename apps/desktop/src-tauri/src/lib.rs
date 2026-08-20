@@ -21,6 +21,7 @@ mod settings_store;
 mod space_scan;
 mod startup_behavior;
 mod state_store;
+mod windows_process;
 
 static SPACE_SCANS: OnceLock<space_scan::SpaceScanManager> = OnceLock::new();
 static CLEANUP_WORKFLOW: OnceLock<cleanup_workflow::CleanupWorkflow> = OnceLock::new();

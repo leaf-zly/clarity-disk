@@ -1,8 +1,9 @@
 //! Windows read-only physical-disk health discovery.
 //!
-//! The adapter launches only the trusted in-box `PowerShell` executable and
-//! supplies one compile-time script without caller-controlled parameters. The
-//! script redacts serial numbers before JSON crosses the process boundary.
+//! The normal path uses native Windows storage IOCTLs and never starts a shell.
+//! A trusted in-box `PowerShell` script remains as a compatibility fallback
+//! for older storage stacks. The fallback script redacts serial numbers before
+//! JSON crosses the process boundary.
 
 use std::{
     path::PathBuf,
@@ -16,8 +17,9 @@ use clarity_core::{
 };
 use serde::Deserialize;
 
-// This immutable, input-free script is the compatibility fallback used only
-// when the primary CIM provider fails. It never invokes a write command.
+// This immutable, input-free script is the last-resort compatibility fallback
+// used when native and modern CIM providers cannot read the device. It never
+// invokes a write command.
 const LEGACY_HEALTH_DISCOVERY_SCRIPT: &str = r"
 $ErrorActionPreference = 'Stop'
 $utf8 = [System.Text.UTF8Encoding]::new($false)
@@ -169,8 +171,8 @@ const HEALTH_DISCOVERY_SCRIPT: &str = include_str!("scripts/disk_health_discover
 
 /// Discovers and conservatively evaluates physical-disk health on Windows.
 ///
-/// The command accepts no caller input, runs only the fixed read-only script,
-/// and never retains a complete device serial number.
+/// The command accepts no caller input, prefers native read-only APIs, and
+/// never retains a complete device serial number.
 ///
 /// # Errors
 ///
@@ -191,6 +193,11 @@ pub fn discover_disk_health() -> Result<DiskHealthSnapshot, DiskHealthDiscoveryE
 
 #[cfg(windows)]
 fn discover_windows_disk_health() -> Result<DiskHealthSnapshot, DiskHealthDiscoveryError> {
+    // Native IOCTL discovery is the normal path. PowerShell remains only as a
+    // compatibility fallback for older storage stacks or restricted devices.
+    if let Ok(native_disks) = crate::native_disk_health_discovery::discover() {
+        return convert_native_health_snapshot(native_disks);
+    }
     let powershell = powershell_path()?;
     let run_provider = |script: &'static str| {
         crate::windows_process::hide_console_window(&mut Command::new(&powershell))
@@ -227,6 +234,65 @@ fn discover_windows_disk_health() -> Result<DiskHealthSnapshot, DiskHealthDiscov
     let envelope: PowerShellHealthEnvelope = serde_json::from_slice(&output.stdout)
         .map_err(DiskHealthDiscoveryError::InvalidProviderResponse)?;
     convert_health_snapshot(envelope)
+}
+
+#[cfg(windows)]
+fn convert_native_health_snapshot(
+    native_disks: Vec<crate::native_disk_health_discovery::NativeDiskHealth>,
+) -> Result<DiskHealthSnapshot, DiskHealthDiscoveryError> {
+    let disks = native_disks
+        .into_iter()
+        .map(convert_native_health_disk)
+        .collect::<Result<Vec<_>, _>>()?;
+    DiskHealthSnapshot::try_new(
+        captured_at_unix_ms(),
+        disks,
+        vec![
+            "Windows native storage APIs returned identity and capacity data; reliability counters, BitLocker state, and temperature remain unavailable.".to_owned(),
+        ],
+    )
+    .map_err(DiskHealthDiscoveryError::InvalidHealthData)
+}
+
+#[cfg(windows)]
+fn convert_native_health_disk(
+    raw: crate::native_disk_health_discovery::NativeDiskHealth,
+) -> Result<PhysicalDiskHealth, DiskHealthDiscoveryError> {
+    PhysicalDiskHealth::try_from_input(PhysicalDiskHealthInput {
+        id: raw.id,
+        number: raw.number,
+        friendly_name: raw.friendly_name,
+        manufacturer: non_empty(raw.manufacturer),
+        model: non_empty(raw.model),
+        firmware_version: non_empty(raw.firmware_version),
+        serial_suffix: non_empty(raw.serial_suffix),
+        bus_type: raw.bus_type,
+        media_type: raw.media_type,
+        size_bytes: raw.size_bytes,
+        operational_status: Vec::new(),
+        is_offline: false,
+        provider_health: ProviderHealthStatus::Unknown,
+        smart_status: SmartHealthStatus::Unavailable,
+        identity_mapping: IdentityMappingConfidence::DiskNumber,
+        temperature_celsius: None,
+        temperature_max_celsius: None,
+        wear_percent_used: None,
+        power_on_hours: None,
+        read_errors_total: None,
+        read_errors_uncorrected: None,
+        write_errors_total: None,
+        write_errors_uncorrected: None,
+        logical_sector_bytes: None,
+        physical_sector_bytes: None,
+        // The native descriptor provider does not enumerate mounted volumes;
+        // one unknown entry prevents the UI from implying encryption is clear.
+        encryption: DiskEncryptionSummary {
+            protected_volumes: 0,
+            unprotected_volumes: 0,
+            unknown_volumes: 1,
+        },
+    })
+    .map_err(DiskHealthDiscoveryError::InvalidHealthData)
 }
 
 #[cfg(windows)]

@@ -30,7 +30,7 @@
 
 封装 Windows Storage API、卷管理、SMART、VSS、BitLocker 和文件系统能力。平台错误必须转换成稳定的领域错误。
 
-当前平台层包括逻辑卷发现、受限清理适配器、物理分区发现和磁盘健康发现。分区拓扑、磁盘身份/容量、扇区/温度以及分区安全评估的正常路径使用 Windows 原生 Storage IOCTL、Power 和 Registry API，不启动 shell；BitLocker、卷影副本、动态磁盘、可靠性计数和备份凭据 ACL 等尚未覆盖的信号保持未知。只有在原生 API 不可用，或检测到需要 ACL/恢复证明的备份凭据时，才回退到受信任的 `%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe` 编译期固定查询。所有未知状态继续保守映射为阻塞，平台层不申请管理员权限，也没有 `diskpart`、格式化、缩放、删除、迁移或重启接口。
+当前平台层包括逻辑卷发现、受限清理适配器、物理分区发现、磁盘健康发现和自动维护保护探测。分区拓扑、磁盘身份/容量、扇区/温度、分区安全评估以及自动维护的空闲/供电/更新/备份信号的正常路径使用 Windows 原生 Storage IOCTL、Power、Registry、User32 和 Toolhelp API，不启动 shell；BitLocker、卷影副本、动态磁盘、可靠性计数和备份凭据 ACL 等尚未覆盖的信号保持未知。只有在原生 API 不可用，或检测到需要 ACL/恢复证明的备份凭据时，才回退到受信任的 `%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe` 编译期固定查询。所有未知状态继续保守映射为阻塞，平台层不申请管理员权限，也没有 `diskpart`、格式化、缩放、删除、迁移或重启接口。
 
 `disk_health_discovery.rs` 复用原生磁盘号身份规则，并通过 `IOCTL_STORAGE_QUERY_PROPERTY` 读取设备描述、总线、固件、扇区和温度；完整序列号在 native provider 内只保留末四位。可靠性计数、BitLocker 汇总和厂商 SMART 在尚未有原生实现时保持未知，旧系统或受限设备才回退到固定 CIM/Storage 查询。`clarity-core::health` 统一验证范围、计算证据完整性并聚合状态；未知提供程序、自监测、身份或可靠性字段不会得到“良好”结论。Tauri 的 `get_disk_health_snapshot` 不接受参数，浏览器服务只使用静态 Fixture。
 

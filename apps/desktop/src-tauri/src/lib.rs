@@ -15,6 +15,7 @@ mod disk_discovery;
 mod disk_health_discovery;
 #[cfg(windows)]
 mod native_disk_health_discovery;
+mod native_maintenance_discovery;
 #[cfg(windows)]
 mod native_partition_discovery;
 #[cfg(windows)]

@@ -54,6 +54,7 @@
 
 - `get_partition_topology` 不接受任何调用方输入；`preview_partition_merge` 只接受后端发现的源/目标分区 ID，并在计算前重新读取拓扑。
 - Windows 正常路径使用编译期固定的 Storage IOCTL、Power 和 Registry API，不启动 shell；未覆盖的 BitLocker、卷影副本、动态磁盘信号保持未知。仅在原生查询失败或需要 ACL/恢复证明时，才从 `SystemRoot` 下的受信任位置启动固定 PowerShell 兼容查询。调用方不能提交脚本、命令、参数、路径、盘符、GUID 或 `diskpart` 文本。
+- 自动维护保护探测使用 User32 `GetLastInputInfo`、Power `GetSystemPowerStatus` 和 Toolhelp 进程快照读取空闲、电源、更新及备份状态，不启动 shell；任一原生信号读取失败都会阻止自动扫描。
 - 分区身份由磁盘唯一标识、分区 GUID、起始偏移和容量共同描述；GUID 缺失、身份重复或容量越界会失败关闭。
 - 只有同一物理磁盘上“左侧目标 + 紧邻右侧源”的普通 NTFS 数据分区可能通过预演。跨磁盘、反向或不相邻布局均返回可解释阻塞。
 - EFI、Microsoft Reserved、恢复、当前系统、启动、未分配和未知分区默认受保护。

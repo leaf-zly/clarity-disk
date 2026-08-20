@@ -234,7 +234,7 @@ fn query_volume_device_number(handle: HANDLE) -> Option<(u32, u32)> {
             handle,
             IOCTL_STORAGE_GET_DEVICE_NUMBER,
             std::ptr::null(),
-            std::ptr::null_mut(),
+            0,
             (&mut number as *mut STORAGE_DEVICE_NUMBER).cast(),
             size_of::<STORAGE_DEVICE_NUMBER>() as u32,
             &mut returned,
@@ -357,7 +357,7 @@ fn open_device(path: &str) -> Option<HANDLE> {
             std::ptr::null(),
             OPEN_EXISTING,
             FILE_ATTRIBUTE_NORMAL,
-            0,
+            std::ptr::null_mut(),
         )
     };
     (handle != INVALID_HANDLE_VALUE).then_some(handle)

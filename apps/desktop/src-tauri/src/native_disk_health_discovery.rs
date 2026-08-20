@@ -248,13 +248,14 @@ fn query_descriptor(handle: HANDLE) -> Result<NativeDescriptor, std::io::Error> 
 
 fn query_alignment(handle: HANDLE) -> Result<(u32, u32), std::io::Error> {
     let mut alignment = STORAGE_ACCESS_ALIGNMENT_DESCRIPTOR::default();
-    if query_fixed_property(handle, StorageAccessAlignmentProperty, &mut alignment) {
-        if alignment.BytesPerLogicalSector > 0 && alignment.BytesPerPhysicalSector > 0 {
-            return Ok((
-                alignment.BytesPerLogicalSector,
-                alignment.BytesPerPhysicalSector,
-            ));
-        }
+    if query_fixed_property(handle, StorageAccessAlignmentProperty, &mut alignment)
+        && alignment.BytesPerLogicalSector > 0
+        && alignment.BytesPerPhysicalSector > 0
+    {
+        return Ok((
+            alignment.BytesPerLogicalSector,
+            alignment.BytesPerPhysicalSector,
+        ));
     }
     Err(std::io::Error::new(
         std::io::ErrorKind::InvalidData,

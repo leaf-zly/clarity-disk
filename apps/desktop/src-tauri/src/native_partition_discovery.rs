@@ -1,7 +1,7 @@
 //! Native Windows partition-topology provider.
 //!
 //! This module intentionally covers the read-only, layout-critical fields
-//! first. Advanced provider signals such as BitLocker, dynamic-disk state,
+//! first. Advanced provider signals such as `BitLocker`, dynamic-disk state,
 //! and reliability counters remain explicit `Unknown` values until their
 //! corresponding native APIs are added. The PowerShell provider is retained
 //! as a compatibility fallback when a device or IOCTL cannot be read.
@@ -71,7 +71,7 @@ pub(crate) fn discover() -> Result<PowerShellTopologyEnvelope, PartitionDiscover
                     "分区容量为负数，原生布局被拒绝。".to_owned(),
                 )
             })?;
-            let guid = partition_guid(&entry);
+            let guid = partition_guid(entry);
             let id = guid.clone().map_or_else(
                 || format!("{disk_id}:offset:{offset}:size:{length}"),
                 |value| format!("partition:{value}"),
@@ -84,15 +84,15 @@ pub(crate) fn discover() -> Result<PowerShellTopologyEnvelope, PartitionDiscover
                 guid,
                 offset_bytes: offset,
                 size_bytes: length,
-                gpt_type: gpt_type(&entry),
-                mbr_type: mbr_type(&entry),
+                gpt_type: gpt_type(entry),
+                mbr_type: mbr_type(entry),
                 file_system: volume.and_then(|value| value.file_system.clone()),
                 label: volume.and_then(|value| value.label.clone()),
                 mount_points: volume
                     .map(|value| value.mount_points.clone())
                     .unwrap_or_default(),
                 is_system: false,
-                is_boot: mbr_boot_indicator(&entry),
+                is_boot: mbr_boot_indicator(entry),
                 is_read_only: false,
                 is_offline: false,
                 encryption_state: "unknown".to_owned(),
@@ -174,10 +174,10 @@ fn enumerate_volumes() -> Result<HashMap<(u32, u32), NativeVolume>, PartitionDis
             .and_modify(|current: &mut NativeVolume| {
                 current.mount_points.push(root.clone());
                 if current.file_system.is_none() {
-                    current.file_system = info.file_system.clone();
+                    current.file_system.clone_from(&info.file_system);
                 }
                 if current.label.is_none() {
-                    current.label = info.label.clone();
+                    current.label.clone_from(&info.label);
                 }
                 if current.used_bytes.is_none() {
                     current.used_bytes = info.used_bytes;
@@ -203,19 +203,24 @@ fn read_volume_info(root: &str) -> NativeVolume {
         GetVolumeInformationW(
             root_wide.as_ptr(),
             label.as_mut_ptr(),
-            label.len() as u32,
-            &mut serial,
-            &mut max_component,
-            &mut flags,
+            u32::try_from(label.len()).expect("volume label buffer length fits u32"),
+            &raw mut serial,
+            &raw mut max_component,
+            &raw mut flags,
             file_system.as_mut_ptr(),
-            file_system.len() as u32,
+            u32::try_from(file_system.len()).expect("file-system buffer length fits u32"),
         ) != 0
     };
     let mut available = 0_u64;
     let mut total = 0_u64;
     let mut free = 0_u64;
     let space_ok = unsafe {
-        GetDiskFreeSpaceExW(root_wide.as_ptr(), &mut available, &mut total, &mut free) != 0
+        GetDiskFreeSpaceExW(
+            root_wide.as_ptr(),
+            &raw mut available,
+            &raw mut total,
+            &raw mut free,
+        ) != 0
     };
     NativeVolume {
         file_system: volume_ok.then(|| from_wide(&file_system)),
@@ -235,9 +240,10 @@ fn query_volume_device_number(handle: HANDLE) -> Option<(u32, u32)> {
             IOCTL_STORAGE_GET_DEVICE_NUMBER,
             std::ptr::null(),
             0,
-            (&mut number as *mut STORAGE_DEVICE_NUMBER).cast(),
-            size_of::<STORAGE_DEVICE_NUMBER>() as u32,
-            &mut returned,
+            (&raw mut number).cast(),
+            u32::try_from(size_of::<STORAGE_DEVICE_NUMBER>())
+                .expect("storage device number size fits u32"),
+            &raw mut returned,
             null_mut(),
         ) != 0
     };
@@ -260,8 +266,8 @@ fn query_layout(handle: HANDLE) -> Result<NativeLayout, std::io::Error> {
                 std::ptr::null(),
                 0,
                 buffer.as_mut_ptr().cast(),
-                buffer.len() as u32,
-                &mut returned,
+                u32::try_from(buffer.len()).expect("IOCTL buffer length fits u32"),
+                &raw mut returned,
                 null_mut(),
             ) != 0
         };
@@ -272,7 +278,7 @@ fn query_layout(handle: HANDLE) -> Result<NativeLayout, std::io::Error> {
                     std::io::Error::new(std::io::ErrorKind::InvalidData, "layout header overflow")
                 })?;
             let header_end = header_size;
-            if returned < header_end as u32 {
+            if returned < u32::try_from(header_end).expect("layout header size fits u32") {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     "layout response was truncated",
@@ -297,7 +303,7 @@ fn query_layout(handle: HANDLE) -> Result<NativeLayout, std::io::Error> {
             let required = header_end.checked_add(entries_size).ok_or_else(|| {
                 std::io::Error::new(std::io::ErrorKind::InvalidData, "layout response overflow")
             })?;
-            if returned < required as u32 {
+            if returned < u32::try_from(required).expect("layout response size fits u32") {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     "layout entries were truncated",
@@ -334,14 +340,15 @@ fn query_disk_size(handle: HANDLE) -> Result<u64, std::io::Error> {
             IOCTL_DISK_GET_LENGTH_INFO,
             std::ptr::null(),
             0,
-            (&mut length as *mut GET_LENGTH_INFORMATION).cast(),
-            size_of::<GET_LENGTH_INFORMATION>() as u32,
-            &mut returned,
+            (&raw mut length).cast(),
+            u32::try_from(size_of::<GET_LENGTH_INFORMATION>())
+                .expect("disk length structure size fits u32"),
+            &raw mut returned,
             null_mut(),
         ) != 0
     };
     if success && length.Length >= 0 {
-        Ok(length.Length as u64)
+        Ok(length.Length.cast_unsigned())
     } else {
         Err(std::io::Error::last_os_error())
     }

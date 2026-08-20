@@ -12,11 +12,14 @@ use std::{mem::size_of, ptr::null_mut};
 use windows_sys::Win32::{
     Foundation::{CloseHandle, GENERIC_READ, HANDLE, INVALID_HANDLE_VALUE},
     Storage::FileSystem::{
-        BusType1394, BusTypeAta, BusTypeAtapi, BusTypeFibre, BusTypeFileBackedVirtual, BusTypeMmc,
-        BusTypeNvme, BusTypeRAID, BusTypeSCM, BusTypeSas, BusTypeSata, BusTypeScsi, BusTypeSd,
-        BusTypeSpaces, BusTypeSsa, BusTypeUfs, BusTypeUnknown, BusTypeUsb, BusTypeVirtual,
-        BusTypeiScsi, CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE,
-        OPEN_EXISTING,
+        BusType1394 as BUS_TYPE_1394, BusTypeAta as BUS_TYPE_ATA, BusTypeAtapi as BUS_TYPE_ATAPI,
+        BusTypeFibre as BUS_TYPE_FIBRE, BusTypeFileBackedVirtual as BUS_TYPE_FILE_BACKED_VIRTUAL,
+        BusTypeMmc as BUS_TYPE_MMC, BusTypeNvme as BUS_TYPE_NVME, BusTypeRAID as BUS_TYPE_RAID,
+        BusTypeSCM as BUS_TYPE_SCM, BusTypeSas as BUS_TYPE_SAS, BusTypeSata as BUS_TYPE_SATA,
+        BusTypeScsi as BUS_TYPE_SCSI, BusTypeSd as BUS_TYPE_SD, BusTypeSpaces as BUS_TYPE_SPACES,
+        BusTypeSsa as BUS_TYPE_SSA, BusTypeUfs as BUS_TYPE_UFS, BusTypeUsb as BUS_TYPE_USB,
+        BusTypeVirtual as BUS_TYPE_VIRTUAL, BusTypeiScsi as BUS_TYPE_ISCSI, CreateFileW,
+        FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
     },
     System::{
         IO::DeviceIoControl,
@@ -73,8 +76,7 @@ pub(crate) fn discover() -> Result<Vec<NativeDiskHealth>, std::io::Error> {
         unsafe { CloseHandle(handle) };
         let size_bytes = match size {
             Ok(value) if value > 0 => value,
-            Ok(_) => continue,
-            Err(_) => continue,
+            Ok(_) | Err(_) => continue,
         };
         disks.push(build_disk(number, size_bytes, descriptor));
     }
@@ -251,26 +253,25 @@ fn serial_suffix(value: &str) -> String {
 
 fn bus_type_name(value: i32) -> String {
     match value {
-        BusType1394 => "IEEE 1394",
-        BusTypeAta => "ATA",
-        BusTypeAtapi => "ATAPI",
-        BusTypeFibre => "Fibre Channel",
-        BusTypeFileBackedVirtual => "File-backed Virtual",
-        BusTypeMmc => "MMC",
-        BusTypeNvme => "NVMe",
-        BusTypeRAID => "RAID",
-        BusTypeSCM => "SCM",
-        BusTypeSas => "SAS",
-        BusTypeSata => "SATA",
-        BusTypeScsi => "SCSI",
-        BusTypeSd => "SD",
-        BusTypeSpaces => "Storage Spaces",
-        BusTypeSsa => "SSA",
-        BusTypeUfs => "UFS",
-        BusTypeUsb => "USB",
-        BusTypeVirtual => "Virtual",
-        BusTypeiScsi => "iSCSI",
-        BusTypeUnknown => "Unknown",
+        BUS_TYPE_1394 => "IEEE 1394",
+        BUS_TYPE_ATA => "ATA",
+        BUS_TYPE_ATAPI => "ATAPI",
+        BUS_TYPE_FIBRE => "Fibre Channel",
+        BUS_TYPE_FILE_BACKED_VIRTUAL => "File-backed Virtual",
+        BUS_TYPE_MMC => "MMC",
+        BUS_TYPE_NVME => "NVMe",
+        BUS_TYPE_RAID => "RAID",
+        BUS_TYPE_SCM => "SCM",
+        BUS_TYPE_SAS => "SAS",
+        BUS_TYPE_SATA => "SATA",
+        BUS_TYPE_SCSI => "SCSI",
+        BUS_TYPE_SD => "SD",
+        BUS_TYPE_SPACES => "Storage Spaces",
+        BUS_TYPE_SSA => "SSA",
+        BUS_TYPE_UFS => "UFS",
+        BUS_TYPE_USB => "USB",
+        BUS_TYPE_VIRTUAL => "Virtual",
+        BUS_TYPE_ISCSI => "iSCSI",
         _ => "Unknown",
     }
     .to_owned()

@@ -215,7 +215,7 @@ pub fn discover_partition_topology() -> Result<PartitionTopology, PartitionDisco
 
 #[cfg(windows)]
 fn discover_windows_partition_topology() -> Result<PartitionTopology, PartitionDiscoveryError> {
-    if let Ok(native_envelope) = native_partition_discovery::discover() {
+    if let Ok(native_envelope) = crate::native_partition_discovery::discover() {
         return convert_topology(native_envelope);
     }
     let powershell = powershell_path()?;

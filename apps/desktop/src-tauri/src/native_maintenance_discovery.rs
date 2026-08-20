@@ -4,6 +4,19 @@
 //! establish any protection signal is returned to the caller so the scheduler
 //! can fail closed instead of guessing that maintenance is safe.
 
+/// Protection evidence required before an unattended cleanup preview.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct MaintenanceContext {
+    /// Seconds since the last keyboard or mouse input.
+    pub(crate) idle_seconds: u32,
+    /// Whether Windows reports stable external power.
+    pub(crate) stable_power: bool,
+    /// Whether an update worker is currently active.
+    pub(crate) system_update_active: bool,
+    /// Whether a backup worker is currently active.
+    pub(crate) backup_active: bool,
+}
+
 #[cfg(windows)]
 mod windows {
     #![allow(unsafe_code)]
@@ -23,22 +36,9 @@ mod windows {
         UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO},
     };
 
-    /// Protection evidence required before an unattended cleanup preview.
-    #[derive(Clone, Debug, PartialEq, Eq)]
-    pub(crate) struct MaintenanceContext {
-        /// Seconds since the last keyboard or mouse input.
-        pub(crate) idle_seconds: u32,
-        /// Whether Windows reports stable external power.
-        pub(crate) stable_power: bool,
-        /// Whether an update worker is currently active.
-        pub(crate) system_update_active: bool,
-        /// Whether a backup worker is currently active.
-        pub(crate) backup_active: bool,
-    }
-
     /// Discovers scheduler protection signals without launching a shell.
-    pub(crate) fn discover() -> Result<MaintenanceContext, io::Error> {
-        Ok(MaintenanceContext {
+    pub(crate) fn discover() -> Result<super::MaintenanceContext, io::Error> {
+        Ok(super::MaintenanceContext {
             idle_seconds: idle_seconds()?,
             stable_power: stable_power()?,
             system_update_active: process_running(&["tiworker.exe", "trustedinstaller.exe"])?,
@@ -48,7 +48,8 @@ mod windows {
 
     fn idle_seconds() -> Result<u32, io::Error> {
         let mut input = LASTINPUTINFO {
-            cbSize: std::mem::size_of::<LASTINPUTINFO>() as u32,
+            cbSize: u32::try_from(std::mem::size_of::<LASTINPUTINFO>())
+                .expect("LASTINPUTINFO size must fit in a Win32 u32 field"),
             dwTime: 0,
         };
         let success = unsafe { GetLastInputInfo(&raw mut input) != 0 };
@@ -87,7 +88,8 @@ mod windows {
         targets: &[&str],
     ) -> Result<bool, io::Error> {
         let mut entry = PROCESSENTRY32W {
-            dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+            dwSize: u32::try_from(std::mem::size_of::<PROCESSENTRY32W>())
+                .expect("PROCESSENTRY32W size must fit in a Win32 u32 field"),
             ..PROCESSENTRY32W::default()
         };
         let first = unsafe { Process32FirstW(snapshot, &raw mut entry) != 0 };
@@ -109,7 +111,7 @@ mod windows {
                 // ERROR_NO_MORE_FILES is the normal end condition. Any other
                 // error is unknown evidence and must block maintenance.
                 let error = io::Error::last_os_error();
-                if error.raw_os_error() == Some(ERROR_NO_MORE_FILES as i32) {
+                if error.raw_os_error() == Some(ERROR_NO_MORE_FILES.cast_signed()) {
                     return Ok(false);
                 }
                 return Err(error);
@@ -119,22 +121,13 @@ mod windows {
 }
 
 #[cfg(windows)]
-pub(crate) use windows::{MaintenanceContext, discover};
+pub(crate) use windows::discover;
 
 #[cfg(not(windows))]
 mod unsupported {
     use std::io;
 
-    /// Protection evidence required before an unattended cleanup preview.
-    #[derive(Clone, Debug, PartialEq, Eq)]
-    pub(crate) struct MaintenanceContext {
-        pub(crate) idle_seconds: u32,
-        pub(crate) stable_power: bool,
-        pub(crate) system_update_active: bool,
-        pub(crate) backup_active: bool,
-    }
-
-    pub(crate) fn discover() -> Result<MaintenanceContext, io::Error> {
+    pub(crate) fn discover() -> Result<super::MaintenanceContext, io::Error> {
         Err(io::Error::new(
             io::ErrorKind::Unsupported,
             "automatic maintenance protection discovery is supported only on Windows",
@@ -143,4 +136,4 @@ mod unsupported {
 }
 
 #[cfg(not(windows))]
-pub(crate) use unsupported::{MaintenanceContext, discover};
+pub(crate) use unsupported::discover;

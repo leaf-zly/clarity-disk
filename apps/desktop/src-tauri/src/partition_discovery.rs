@@ -217,7 +217,7 @@ pub fn discover_partition_topology() -> Result<PartitionTopology, PartitionDisco
 fn discover_windows_partition_topology() -> Result<PartitionTopology, PartitionDiscoveryError> {
     let powershell = powershell_path()?;
     let run_provider = |script: &'static str| {
-        crate::windows_process::hide_console_window(Command::new(&powershell))
+        crate::windows_process::hide_console_window(&mut Command::new(&powershell))
             .args([
                 "-NoLogo",
                 "-NoProfile",

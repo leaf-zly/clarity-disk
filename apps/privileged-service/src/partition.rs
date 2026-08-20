@@ -245,7 +245,7 @@ $source=ReadPartition $sourceNumber; $target=ReadPartition $targetNumber
 ";
     let powershell = trusted_system_executable(&["WindowsPowerShell", "v1.0", "powershell.exe"])?;
     let output =
-        crate::windows_process::hide_console_window(std::process::Command::new(powershell))
+        crate::windows_process::hide_console_window(&mut std::process::Command::new(powershell))
             .args([
                 "-NoLogo",
                 "-NoProfile",
@@ -360,7 +360,7 @@ fn preflight_migration_tree(root: &std::path::Path) -> Result<(), String> {
 fn run_robocopy(source: &std::path::Path, destination: &std::path::Path) -> Result<(), String> {
     let executable = trusted_system_executable(&["robocopy.exe"])?;
     let output =
-        crate::windows_process::hide_console_window(std::process::Command::new(executable))
+        crate::windows_process::hide_console_window(&mut std::process::Command::new(executable))
             .arg(source)
             .arg(destination)
             .args([
@@ -475,7 +475,7 @@ Resize-Partition -InputObject $target -Size $supported.SizeMax -ErrorAction Stop
         .guid
         .as_deref()
         .ok_or_else(|| "目标分区 GUID 缺失。".to_owned())?;
-    let output = crate::windows_process::hide_console_window(std::process::Command::new(
+    let output = crate::windows_process::hide_console_window(&mut std::process::Command::new(
         trusted_system_executable(&["WindowsPowerShell", "v1.0", "powershell.exe"])?,
     ))
     .args([
@@ -541,7 +541,7 @@ fn verify_postconditions(
         target_size: u64,
         target_guid: String,
     }
-    let output = crate::windows_process::hide_console_window(std::process::Command::new(
+    let output = crate::windows_process::hide_console_window(&mut std::process::Command::new(
         trusted_system_executable(&["WindowsPowerShell", "v1.0", "powershell.exe"])?,
     ))
     .args([

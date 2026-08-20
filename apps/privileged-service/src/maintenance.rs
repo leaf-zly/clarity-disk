@@ -215,7 +215,7 @@ fn run_checked(
 ) -> Result<(), MaintenanceError> {
     use std::process::{Command, Stdio};
 
-    let output = crate::windows_process::hide_console_window(Command::new(executable))
+    let output = crate::windows_process::hide_console_window(&mut Command::new(executable))
         .args(arguments)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

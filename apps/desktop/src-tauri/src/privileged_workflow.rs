@@ -342,7 +342,7 @@ fn confirmation_phrase(operation: &PrivilegedOperation) -> &'static str {
 }
 
 fn query_capabilities(path: &Path) -> Option<PrivilegedCapabilities> {
-    let output = crate::windows_process::hide_console_window(Command::new(path))
+    let output = crate::windows_process::hide_console_window(&mut Command::new(path))
         .arg("--capabilities")
         .stdin(Stdio::null())
         .stderr(Stdio::null())

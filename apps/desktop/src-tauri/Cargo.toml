@@ -25,6 +25,9 @@ tauri.workspace = true
 thiserror.workspace = true
 
 [target.'cfg(windows)'.dependencies]
+# `wmi` accepts multiple incompatible windows-core generations. Pin the COM
+# ABI to the generation used by `windows` 0.61 so its interfaces stay coherent.
+windows-core = "=0.61.2"
 wmi = { version = "0.18.4", default-features = false }
 windows-sys = { version = "0.61.2", features = [
   "Win32_Foundation",

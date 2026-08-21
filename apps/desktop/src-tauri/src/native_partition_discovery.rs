@@ -46,130 +46,9 @@ pub(crate) fn discover() -> Result<PowerShellTopologyEnvelope, PartitionDiscover
     );
 
     for number in 0..MAX_DISK_NUMBER {
-        let Some(handle) = open_device(&format!(r"\\.\PhysicalDrive{number}")) else {
-            continue;
-        };
-        let layout = query_layout(handle).map_err(|error| {
-            PartitionDiscoveryError::NativeProviderFailed(format!("PhysicalDrive{number}: {error}"))
-        });
-        let size = query_disk_size(handle).ok();
-        unsafe { CloseHandle(handle) };
-
-        let layout = layout?;
-        let disk_id = format!("disk-number:{number}:native-layout");
-        let disk_evidence = enrichment.disks.get(&number);
-        let mut partitions = Vec::new();
-        for entry in &layout.entries {
-            if entry.PartitionNumber == 0 || entry.PartitionLength <= 0 {
-                continue;
-            }
-            let offset = u64::try_from(entry.StartingOffset).map_err(|_| {
-                PartitionDiscoveryError::NativeProviderFailed(
-                    "分区起始偏移为负数，原生布局被拒绝。".to_owned(),
-                )
-            })?;
-            let length = u64::try_from(entry.PartitionLength).map_err(|_| {
-                PartitionDiscoveryError::NativeProviderFailed(
-                    "分区容量为负数，原生布局被拒绝。".to_owned(),
-                )
-            })?;
-            let guid = partition_guid(entry);
-            let id = guid.clone().map_or_else(
-                || format!("{disk_id}:offset:{offset}:size:{length}"),
-                |value| format!("partition:{value}"),
-            );
-            let volume = volumes.get(&(number, entry.PartitionNumber));
-            let partition_evidence = enrichment.partitions.get(&(number, entry.PartitionNumber));
-            let disk_read_only = disk_evidence.and_then(|value| value.is_read_only);
-            let disk_offline = disk_evidence.and_then(|value| value.is_offline);
-            partitions.push(PowerShellPartition {
-                id,
-                disk_id: disk_id.clone(),
-                partition_number: entry.PartitionNumber,
-                guid,
-                offset_bytes: offset,
-                size_bytes: length,
-                gpt_type: gpt_type(entry),
-                mbr_type: mbr_type(entry),
-                file_system: volume.and_then(|value| value.file_system.clone()),
-                label: volume.and_then(|value| value.label.clone()),
-                mount_points: volume
-                    .map(|value| value.mount_points.clone())
-                    .unwrap_or_default(),
-                is_system: partition_evidence
-                    .and_then(|value| value.is_system)
-                    .unwrap_or(false),
-                is_boot: mbr_boot_indicator(entry)
-                    || partition_evidence
-                        .and_then(|value| value.is_boot)
-                        .unwrap_or(false),
-                is_read_only: disk_read_only.unwrap_or(false)
-                    || partition_evidence
-                        .and_then(|value| value.is_read_only)
-                        .unwrap_or(false),
-                is_offline: disk_offline.unwrap_or(false)
-                    || partition_evidence
-                        .and_then(|value| value.is_offline)
-                        .unwrap_or(false),
-                encryption_state: "unknown".to_owned(),
-                snapshot_state: match enrichment.shadow_copy_present {
-                    Some(true) => "present",
-                    Some(false) => "none",
-                    None => "unknown",
-                }
-                .to_owned(),
-                health: volume
-                    .and_then(|value| value.health.clone())
-                    .unwrap_or_else(|| "unknown".to_owned()),
-                used_bytes: volume.and_then(|value| value.used_bytes),
-                free_bytes: volume.and_then(|value| value.free_bytes),
-            });
+        if let Some(disk) = discover_disk(number, &enrichment, &volumes, &mut warnings)? {
+            disks.push(disk);
         }
-
-        let disk_size = size.unwrap_or_else(|| {
-            partitions
-                .iter()
-                .filter_map(|partition| partition.offset_bytes.checked_add(partition.size_bytes))
-                .max()
-                .unwrap_or_default()
-        });
-        if disk_size == 0 {
-            warnings.push(format!("磁盘 {number} 的容量不可用，已保持阻塞。"));
-        }
-        disks.push(PowerShellDisk {
-            id: disk_id,
-            number,
-            friendly_name: disk_evidence
-                .and_then(|value| value.friendly_name.clone())
-                .unwrap_or_else(|| format!("物理磁盘 {number}")),
-            bus_type: disk_evidence
-                .and_then(|value| value.bus_type.clone())
-                .unwrap_or_else(|| "Unknown".to_owned()),
-            partition_style: partition_style(layout.partition_style).to_owned(),
-            size_bytes: disk_size,
-            layout_kind: if disk_evidence.is_some_and(|value| value.is_storage_spaces) {
-                "storageSpaces"
-            } else if enrichment
-                .dynamic_disks
-                .as_ref()
-                .is_some_and(|values| values.contains(&number))
-            {
-                "dynamic"
-            } else if enrichment.dynamic_disks.is_some() {
-                "basic"
-            } else {
-                "unknown"
-            }
-            .to_owned(),
-            health: disk_evidence
-                .and_then(|value| value.health.clone())
-                .unwrap_or_else(|| "unknown".to_owned()),
-            media_error_state: "unknown".to_owned(),
-            is_offline: disk_evidence
-                .and_then(|value| value.is_offline)
-                .unwrap_or(false),
-            partitions,
-        });
     }
 
     if disks.is_empty() {
@@ -178,6 +57,149 @@ pub(crate) fn discover() -> Result<PowerShellTopologyEnvelope, PartitionDiscover
         ));
     }
     Ok(PowerShellTopologyEnvelope { disks, warnings })
+}
+
+fn discover_disk(
+    number: u32,
+    enrichment: &crate::native_storage_wmi_discovery::StorageEvidence,
+    volumes: &HashMap<(u32, u32), NativeVolume>,
+    warnings: &mut Vec<String>,
+) -> Result<Option<PowerShellDisk>, PartitionDiscoveryError> {
+    let Some(handle) = open_device(&format!(r"\\.\PhysicalDrive{number}")) else {
+        return Ok(None);
+    };
+    let layout = query_layout(handle).map_err(|error| {
+        PartitionDiscoveryError::NativeProviderFailed(format!("PhysicalDrive{number}: {error}"))
+    });
+    let size = query_disk_size(handle).ok();
+    unsafe { CloseHandle(handle) };
+    let layout = layout?;
+    let disk_id = format!("disk-number:{number}:native-layout");
+    let mut partitions = Vec::new();
+    for entry in &layout.entries {
+        if let Some(partition) = convert_partition(entry, number, &disk_id, enrichment, volumes)? {
+            partitions.push(partition);
+        }
+    }
+    let disk_size = size.unwrap_or_else(|| disk_size_from_partitions(&partitions));
+    if disk_size == 0 {
+        warnings.push(format!("磁盘 {number} 的容量不可用，已保持阻塞。"));
+    }
+    let evidence = enrichment.disks.get(&number);
+    Ok(Some(PowerShellDisk {
+        id: disk_id,
+        number,
+        friendly_name: evidence
+            .and_then(|value| value.friendly_name.clone())
+            .unwrap_or_else(|| format!("物理磁盘 {number}")),
+        bus_type: evidence
+            .and_then(|value| value.bus_type.clone())
+            .unwrap_or_else(|| "Unknown".to_owned()),
+        partition_style: partition_style(layout.partition_style).to_owned(),
+        size_bytes: disk_size,
+        layout_kind: layout_kind(number, enrichment, evidence),
+        health: evidence
+            .and_then(|value| value.health.clone())
+            .unwrap_or_else(|| "unknown".to_owned()),
+        media_error_state: "unknown".to_owned(),
+        is_offline: evidence.and_then(|value| value.is_offline).unwrap_or(false),
+        partitions,
+    }))
+}
+
+fn convert_partition(
+    entry: &PARTITION_INFORMATION_EX,
+    disk_number: u32,
+    disk_id: &str,
+    enrichment: &crate::native_storage_wmi_discovery::StorageEvidence,
+    volumes: &HashMap<(u32, u32), NativeVolume>,
+) -> Result<Option<PowerShellPartition>, PartitionDiscoveryError> {
+    if entry.PartitionNumber == 0 || entry.PartitionLength <= 0 {
+        return Ok(None);
+    }
+    let offset = u64::try_from(entry.StartingOffset).map_err(|_| {
+        PartitionDiscoveryError::NativeProviderFailed(
+            "分区起始偏移为负数，原生布局被拒绝。".to_owned(),
+        )
+    })?;
+    let length = u64::try_from(entry.PartitionLength).map_err(|_| {
+        PartitionDiscoveryError::NativeProviderFailed("分区容量为负数，原生布局被拒绝。".to_owned())
+    })?;
+    let guid = partition_guid(entry);
+    let id = guid.clone().map_or_else(
+        || format!("{disk_id}:offset:{offset}:size:{length}"),
+        |value| format!("partition:{value}"),
+    );
+    let key = (disk_number, entry.PartitionNumber);
+    let volume = volumes.get(&key);
+    let evidence = enrichment.partitions.get(&key);
+    let disk = enrichment.disks.get(&disk_number);
+    Ok(Some(PowerShellPartition {
+        id,
+        disk_id: disk_id.to_owned(),
+        partition_number: entry.PartitionNumber,
+        guid,
+        offset_bytes: offset,
+        size_bytes: length,
+        gpt_type: gpt_type(entry),
+        mbr_type: mbr_type(entry),
+        file_system: volume.and_then(|value| value.file_system.clone()),
+        label: volume.and_then(|value| value.label.clone()),
+        mount_points: volume
+            .map(|value| value.mount_points.clone())
+            .unwrap_or_default(),
+        is_system: evidence.and_then(|value| value.system).unwrap_or(false),
+        is_boot: mbr_boot_indicator(entry)
+            || evidence.and_then(|value| value.boot).unwrap_or(false),
+        is_read_only: disk.and_then(|value| value.is_read_only).unwrap_or(false)
+            || evidence.and_then(|value| value.read_only).unwrap_or(false),
+        is_offline: disk.and_then(|value| value.is_offline).unwrap_or(false)
+            || evidence.and_then(|value| value.offline).unwrap_or(false),
+        encryption_state: "unknown".to_owned(),
+        snapshot_state: snapshot_state(enrichment.shadow_copy_present).to_owned(),
+        health: volume
+            .and_then(|value| value.health.clone())
+            .unwrap_or_else(|| "unknown".to_owned()),
+        used_bytes: volume.and_then(|value| value.used_bytes),
+        free_bytes: volume.and_then(|value| value.free_bytes),
+    }))
+}
+
+fn layout_kind(
+    number: u32,
+    enrichment: &crate::native_storage_wmi_discovery::StorageEvidence,
+    disk: Option<&crate::native_storage_wmi_discovery::DiskEvidence>,
+) -> String {
+    if disk.is_some_and(|value| value.is_storage_spaces) {
+        "storageSpaces"
+    } else if enrichment
+        .dynamic_disks
+        .as_ref()
+        .is_some_and(|values| values.contains(&number))
+    {
+        "dynamic"
+    } else if enrichment.dynamic_disks.is_some() {
+        "basic"
+    } else {
+        "unknown"
+    }
+    .to_owned()
+}
+
+fn snapshot_state(present: Option<bool>) -> &'static str {
+    match present {
+        Some(true) => "present",
+        Some(false) => "none",
+        None => "unknown",
+    }
+}
+
+fn disk_size_from_partitions(partitions: &[PowerShellPartition]) -> u64 {
+    partitions
+        .iter()
+        .filter_map(|partition| partition.offset_bytes.checked_add(partition.size_bytes))
+        .max()
+        .unwrap_or_default()
 }
 
 #[derive(Clone, Debug, Default)]

@@ -47,13 +47,13 @@ pub(crate) struct DiskEvidence {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct PartitionEvidence {
     /// Whether Windows identifies the partition as the running system volume.
-    pub(crate) is_system: Option<bool>,
+    pub(crate) system: Option<bool>,
     /// Whether Windows identifies the partition as a boot partition.
-    pub(crate) is_boot: Option<bool>,
+    pub(crate) boot: Option<bool>,
     /// Explicit partition-level read-only state.
-    pub(crate) is_read_only: Option<bool>,
+    pub(crate) read_only: Option<bool>,
     /// Explicit partition-level offline state.
-    pub(crate) is_offline: Option<bool>,
+    pub(crate) offline: Option<bool>,
 }
 
 /// Queries Windows Storage and CIM providers without starting a child process.
@@ -108,10 +108,10 @@ fn discover_storage(connection: &WMIConnection, evidence: &mut StorageEvidence) 
                 evidence.partitions.insert(
                     (row.disk_number, row.partition_number),
                     PartitionEvidence {
-                        is_system: row.is_system,
-                        is_boot: row.is_boot,
-                        is_read_only: row.is_read_only,
-                        is_offline: row.is_offline,
+                        system: row.is_system,
+                        boot: row.is_boot,
+                        read_only: row.is_read_only,
+                        offline: row.is_offline,
                     },
                 );
             }

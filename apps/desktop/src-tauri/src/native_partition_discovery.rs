@@ -37,12 +37,13 @@ const ERROR_INSUFFICIENT_BUFFER: i32 = 122;
 
 /// Discovers the basic disk layout without starting a shell process.
 pub(crate) fn discover() -> Result<PowerShellTopologyEnvelope, PartitionDiscoveryError> {
-    let volumes = enumerate_volumes()?;
+    let enrichment = crate::native_storage_wmi_discovery::discover();
+    let volumes = enumerate_volumes(&enrichment.volume_health)?;
     let mut disks = Vec::new();
-    let mut warnings = vec![
-        "原生拓扑已读取；动态磁盘、Storage Spaces、BitLocker 和卷影副本状态将在后续能力中补充。"
-            .to_owned(),
-    ];
+    let mut warnings = enrichment.warnings;
+    warnings.push(
+        "BitLocker 和介质可靠性计数无法在普通权限下确认时保持未知，不会被推断为安全。".to_owned(),
+    );
 
     for number in 0..MAX_DISK_NUMBER {
         let Some(handle) = open_device(&format!(r"\\.\PhysicalDrive{number}")) else {
@@ -56,6 +57,7 @@ pub(crate) fn discover() -> Result<PowerShellTopologyEnvelope, PartitionDiscover
 
         let layout = layout?;
         let disk_id = format!("disk-number:{number}:native-layout");
+        let disk_evidence = enrichment.disks.get(&number);
         let mut partitions = Vec::new();
         for entry in &layout.entries {
             if entry.PartitionNumber == 0 || entry.PartitionLength <= 0 {
@@ -77,6 +79,9 @@ pub(crate) fn discover() -> Result<PowerShellTopologyEnvelope, PartitionDiscover
                 |value| format!("partition:{value}"),
             );
             let volume = volumes.get(&(number, entry.PartitionNumber));
+            let partition_evidence = enrichment.partitions.get(&(number, entry.PartitionNumber));
+            let disk_read_only = disk_evidence.and_then(|value| value.is_read_only);
+            let disk_offline = disk_evidence.and_then(|value| value.is_offline);
             partitions.push(PowerShellPartition {
                 id,
                 disk_id: disk_id.clone(),
@@ -91,13 +96,31 @@ pub(crate) fn discover() -> Result<PowerShellTopologyEnvelope, PartitionDiscover
                 mount_points: volume
                     .map(|value| value.mount_points.clone())
                     .unwrap_or_default(),
-                is_system: false,
-                is_boot: mbr_boot_indicator(entry),
-                is_read_only: false,
-                is_offline: false,
+                is_system: partition_evidence
+                    .and_then(|value| value.is_system)
+                    .unwrap_or(false),
+                is_boot: mbr_boot_indicator(entry)
+                    || partition_evidence
+                        .and_then(|value| value.is_boot)
+                        .unwrap_or(false),
+                is_read_only: disk_read_only.unwrap_or(false)
+                    || partition_evidence
+                        .and_then(|value| value.is_read_only)
+                        .unwrap_or(false),
+                is_offline: disk_offline.unwrap_or(false)
+                    || partition_evidence
+                        .and_then(|value| value.is_offline)
+                        .unwrap_or(false),
                 encryption_state: "unknown".to_owned(),
-                snapshot_state: "unknown".to_owned(),
-                health: "unknown".to_owned(),
+                snapshot_state: match enrichment.shadow_copy_present {
+                    Some(true) => "present",
+                    Some(false) => "none",
+                    None => "unknown",
+                }
+                .to_owned(),
+                health: volume
+                    .and_then(|value| value.health.clone())
+                    .unwrap_or_else(|| "unknown".to_owned()),
                 used_bytes: volume.and_then(|value| value.used_bytes),
                 free_bytes: volume.and_then(|value| value.free_bytes),
             });
@@ -116,14 +139,35 @@ pub(crate) fn discover() -> Result<PowerShellTopologyEnvelope, PartitionDiscover
         disks.push(PowerShellDisk {
             id: disk_id,
             number,
-            friendly_name: format!("物理磁盘 {number}"),
-            bus_type: "Unknown".to_owned(),
+            friendly_name: disk_evidence
+                .and_then(|value| value.friendly_name.clone())
+                .unwrap_or_else(|| format!("物理磁盘 {number}")),
+            bus_type: disk_evidence
+                .and_then(|value| value.bus_type.clone())
+                .unwrap_or_else(|| "Unknown".to_owned()),
             partition_style: partition_style(layout.partition_style).to_owned(),
             size_bytes: disk_size,
-            layout_kind: "basic".to_owned(),
-            health: "unknown".to_owned(),
+            layout_kind: if disk_evidence.is_some_and(|value| value.is_storage_spaces) {
+                "storageSpaces"
+            } else if enrichment
+                .dynamic_disks
+                .as_ref()
+                .is_some_and(|values| values.contains(&number))
+            {
+                "dynamic"
+            } else if enrichment.dynamic_disks.is_some() {
+                "basic"
+            } else {
+                "unknown"
+            }
+            .to_owned(),
+            health: disk_evidence
+                .and_then(|value| value.health.clone())
+                .unwrap_or_else(|| "unknown".to_owned()),
             media_error_state: "unknown".to_owned(),
-            is_offline: false,
+            is_offline: disk_evidence
+                .and_then(|value| value.is_offline)
+                .unwrap_or(false),
             partitions,
         });
     }
@@ -143,9 +187,12 @@ struct NativeVolume {
     mount_points: Vec<String>,
     used_bytes: Option<u64>,
     free_bytes: Option<u64>,
+    health: Option<String>,
 }
 
-fn enumerate_volumes() -> Result<HashMap<(u32, u32), NativeVolume>, PartitionDiscoveryError> {
+fn enumerate_volumes(
+    health_by_letter: &HashMap<char, String>,
+) -> Result<HashMap<(u32, u32), NativeVolume>, PartitionDiscoveryError> {
     let mask = unsafe { GetLogicalDrives() };
     if mask == 0 {
         return Err(PartitionDiscoveryError::NativeProviderFailed(
@@ -169,6 +216,7 @@ fn enumerate_volumes() -> Result<HashMap<(u32, u32), NativeVolume>, PartitionDis
             continue;
         };
         let info = read_volume_info(&root);
+        let provider_health = health_by_letter.get(&letter).cloned();
         volumes
             .entry((disk_number, partition_number))
             .and_modify(|current: &mut NativeVolume| {
@@ -183,9 +231,13 @@ fn enumerate_volumes() -> Result<HashMap<(u32, u32), NativeVolume>, PartitionDis
                     current.used_bytes = info.used_bytes;
                     current.free_bytes = info.free_bytes;
                 }
+                if current.health.is_none() {
+                    current.health.clone_from(&provider_health);
+                }
             })
             .or_insert_with(|| NativeVolume {
                 mount_points: vec![root],
+                health: provider_health,
                 ..info
             });
     }
@@ -228,6 +280,7 @@ fn read_volume_info(root: &str) -> NativeVolume {
         mount_points: Vec::new(),
         used_bytes: space_ok.then(|| total.saturating_sub(free)),
         free_bytes: space_ok.then_some(free),
+        health: None,
     }
 }
 

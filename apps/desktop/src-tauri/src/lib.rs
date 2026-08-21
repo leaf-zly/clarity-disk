@@ -20,6 +20,8 @@ mod native_maintenance_discovery;
 mod native_partition_discovery;
 #[cfg(windows)]
 mod native_partition_safety_discovery;
+#[cfg(windows)]
+mod native_storage_wmi_discovery;
 mod partition_discovery;
 mod partition_safety_discovery;
 mod privileged_workflow;

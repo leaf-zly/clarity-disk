@@ -25,6 +25,7 @@ tauri.workspace = true
 thiserror.workspace = true
 
 [target.'cfg(windows)'.dependencies]
+wmi = { version = "0.18.4", default-features = false }
 windows-sys = { version = "0.61.2", features = [
   "Win32_Foundation",
   "Win32_Security",

@@ -37,10 +37,10 @@ const ERROR_INSUFFICIENT_BUFFER: i32 = 122;
 
 /// Discovers the basic disk layout without starting a shell process.
 pub(crate) fn discover() -> Result<PowerShellTopologyEnvelope, PartitionDiscoveryError> {
-    let enrichment = crate::native_storage_wmi_discovery::discover();
+    let mut enrichment = crate::native_storage_wmi_discovery::discover();
     let volumes = enumerate_volumes(&enrichment.volume_health)?;
     let mut disks = Vec::new();
-    let mut warnings = enrichment.warnings;
+    let mut warnings = std::mem::take(&mut enrichment.warnings);
     warnings.push(
         "BitLocker 和介质可靠性计数无法在普通权限下确认时保持未知，不会被推断为安全。".to_owned(),
     );

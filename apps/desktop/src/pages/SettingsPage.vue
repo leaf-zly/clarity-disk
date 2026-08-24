@@ -27,6 +27,7 @@ import {
   updateAppSettings,
 } from "@/services/operations-service";
 import { checkForUpdates } from "@/services/release-service";
+import { applyLanguagePreference, translate } from "@/services/locale-service";
 import { applyThemePreference } from "@/services/theme-service";
 import type {
   AppSettings,
@@ -47,6 +48,8 @@ const updateBusy = ref(false);
 const message = ref("");
 const errorMessage = ref("");
 const persistedTheme = shallowRef<AppSettings["theme"]>("system");
+const persistedLanguage =
+  shallowRef<AppSettings["language"]>("simplifiedChinese");
 
 const performancePassed = computed(
   () =>
@@ -64,6 +67,8 @@ async function load(): Promise<void> {
       getDiagnosticsSnapshot(),
     ]);
     persistedTheme.value = nextSettings.theme;
+    persistedLanguage.value = nextSettings.language;
+    applyLanguagePreference(nextSettings.language);
     settings.value = nextSettings;
     diagnostics.value = nextDiagnostics;
     ignoredRootsText.value = nextSettings.ignoredScanRoots.join("\n");
@@ -90,6 +95,8 @@ async function save(): Promise<void> {
     settings.value = await updateAppSettings(payload);
     ignoredRootsText.value = settings.value.ignoredScanRoots.join("\n");
     persistedTheme.value = settings.value.theme;
+    persistedLanguage.value = settings.value.language;
+    applyLanguagePreference(settings.value.language);
     applyThemePreference(settings.value.theme);
     diagnostics.value = await getDiagnosticsSnapshot();
     message.value = "设置已验证并保存。";
@@ -161,10 +168,23 @@ watch(
   },
 );
 
+watch(
+  () => settings.value?.language,
+  (language) => {
+    if (language) applyLanguagePreference(language);
+  },
+);
+
 onDeactivated(() => {
-  if (!settings.value || settings.value.theme === persistedTheme.value) return;
-  settings.value.theme = persistedTheme.value;
-  applyThemePreference(persistedTheme.value);
+  if (!settings.value) return;
+  if (settings.value.theme !== persistedTheme.value) {
+    settings.value.theme = persistedTheme.value;
+    applyThemePreference(persistedTheme.value);
+  }
+  if (settings.value.language !== persistedLanguage.value) {
+    settings.value.language = persistedLanguage.value;
+    applyLanguagePreference(persistedLanguage.value);
+  }
 });
 
 onMounted(() => void load());
@@ -174,8 +194,8 @@ onMounted(() => void load());
   <section class="settings-page" aria-labelledby="settings-title">
     <header class="page-header">
       <div>
-        <p class="eyebrow">本地优先</p>
-        <h1 id="settings-title">设置与隐私</h1>
+        <p class="eyebrow">{{ translate("localFirst") }}</p>
+        <h1 id="settings-title">{{ translate("settingsTitle") }}</h1>
         <p>所有偏好使用版本化本地配置；忽略规则不能绕过执行器安全校验。</p>
       </div>
       <button
@@ -184,7 +204,7 @@ onMounted(() => void load());
         :disabled="busy || !settings"
         @click="save"
       >
-        <Save :size="16" />保存更改
+        <Save :size="16" />{{ translate("saveChanges") }}
       </button>
     </header>
 
@@ -199,33 +219,37 @@ onMounted(() => void load());
           <div class="card-title">
             <ShieldCheck :size="20" />
             <div>
-              <h2>外观与行为</h2>
-              <p>界面偏好和 Windows 启动行为。</p>
+              <h2>{{ translate("appearance") }}</h2>
+              <p>{{ translate("appearanceDescription") }}</p>
             </div>
           </div>
           <label
-            >主题<select v-model="settings.theme">
+            >{{ translate("theme")
+            }}<select v-model="settings.theme">
               <option value="system">跟随系统</option>
               <option value="light">浅色</option>
               <option value="dark">深色</option>
             </select></label
           >
           <label
-            >语言<select v-model="settings.language">
-              <option value="simplifiedChinese">简体中文</option>
-              <option value="english">English</option>
+            >{{ translate("language")
+            }}<select v-model="settings.language">
+              <option value="simplifiedChinese">
+                {{ translate("simplifiedChinese") }}
+              </option>
+              <option value="english">{{ translate("english") }}</option>
             </select></label
           >
           <label class="switch"
-            ><input v-model="settings.launchAtLogin" type="checkbox" /><span
-              >登录 Windows 后启动 Clarity Disk</span
-            ></label
+            ><input v-model="settings.launchAtLogin" type="checkbox" /><span>{{
+              translate("launchAtLogin")
+            }}</span></label
           >
           <label class="switch"
             ><input
               v-model="settings.notificationsEnabled"
               type="checkbox"
-            /><span>允许维护完成通知</span></label
+            /><span>{{ translate("notifications") }}</span></label
           >
         </article>
 
@@ -233,7 +257,7 @@ onMounted(() => void load());
           <div class="card-title">
             <LockKeyhole :size="20" />
             <div>
-              <h2>隐私与诊断</h2>
+              <h2>{{ translate("privacyDiagnostics") }}</h2>
               <p>日志不会保存文件内容或完整敏感路径。</p>
             </div>
           </div>

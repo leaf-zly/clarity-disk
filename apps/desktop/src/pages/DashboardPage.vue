@@ -33,6 +33,7 @@ import {
   loadDashboardSnapshot,
 } from "@/services/dashboard-service";
 import { getAppSettings } from "@/services/operations-service";
+import { translate } from "@/services/locale-service";
 import type {
   CleanupPlan,
   DashboardSnapshot,
@@ -170,19 +171,19 @@ const pageCopy = computed(() => {
   const copy: Record<DashboardSection, { title: string; description: string }> =
     {
       overview: {
-        title: "下午好",
-        description: "查看磁盘容量、清理建议和维护状态。",
+        title: translate("overviewTitle"),
+        description: translate("overviewDescription"),
       },
       space: {
-        title: "空间分析",
+        title: translate("space"),
         description: "按受限范围执行只读扫描，定位空间占用。",
       },
       cleanup: {
-        title: "智能清理",
+        title: translate("cleanup"),
         description: "先预览、再确认；所有候选均经过后端安全校验。",
       },
       "large-files": {
-        title: "大文件",
+        title: translate("largeFiles"),
         description: "完成只读空间分析后查看最大的文件与目录。",
       },
     };

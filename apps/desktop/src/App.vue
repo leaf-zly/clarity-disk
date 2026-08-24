@@ -10,7 +10,11 @@ import PartitionPreviewPage from "@/pages/PartitionPreviewPage.vue";
 import SystemMaintenancePage from "@/pages/SystemMaintenancePage.vue";
 import RecoveryCenterPage from "@/pages/RecoveryCenterPage.vue";
 import SettingsPage from "@/pages/SettingsPage.vue";
-import { runAutomaticMaintenance } from "@/services/operations-service";
+import { applyLanguagePreference } from "@/services/locale-service";
+import {
+  getAppSettings,
+  runAutomaticMaintenance,
+} from "@/services/operations-service";
 import { isDashboardSection, type AppSection } from "@/types/navigation";
 
 const activeSection = ref<AppSection>("overview");
@@ -20,6 +24,9 @@ const dashboardSection = computed(() =>
 let maintenanceTimer: ReturnType<typeof setInterval> | undefined;
 
 onMounted(() => {
+  void getAppSettings()
+    .then((settings) => applyLanguagePreference(settings.language))
+    .catch(() => undefined);
   void runAutomaticMaintenance().catch(() => {
     // Unknown power/update/backup evidence safely blocks the read-only tick.
   });

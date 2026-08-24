@@ -45,4 +45,15 @@ describe("SettingsPage theme", () => {
     expect(document.documentElement.dataset.theme).toBe("dark");
     expect(document.documentElement.style.colorScheme).toBe("dark");
   });
+
+  it("switches the visible settings copy when English is selected", async () => {
+    const wrapper = mount(SettingsPage);
+    await flushPromises();
+
+    await wrapper.findAll("select")[1]?.setValue("english");
+
+    expect(wrapper.get("h1").text()).toBe("Settings & Privacy");
+    expect(wrapper.text()).toContain("Save changes");
+    expect(document.documentElement.lang).toBe("en");
+  });
 });

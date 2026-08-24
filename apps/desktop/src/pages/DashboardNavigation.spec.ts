@@ -52,5 +52,17 @@ describe("DashboardPage navigation", () => {
     expect(cleanupButton).toBeDefined();
     await cleanupButton?.trigger("click");
     expect(wrapper.emitted("navigate")?.at(-1)).toEqual(["cleanup"]);
+
+    await wrapper
+      .findAll("button")
+      .find((button) => button.text().includes("查看报告"))
+      ?.trigger("click");
+    expect(wrapper.emitted("navigate")?.at(-1)).toEqual(["history"]);
+
+    await wrapper
+      .findAll("button")
+      .find((button) => button.text().includes("全部建议"))
+      ?.trigger("click");
+    expect(wrapper.emitted("navigate")?.at(-1)).toEqual(["cleanup"]);
   });
 });

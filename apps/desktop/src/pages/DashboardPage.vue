@@ -32,12 +32,19 @@ import {
   getDefaultSpaceScanRequest,
   loadDashboardSnapshot,
 } from "@/services/dashboard-service";
-import type { CleanupPlan, DashboardSnapshot } from "@/types/dashboard";
+import { getAppSettings } from "@/services/operations-service";
+import type {
+  CleanupPlan,
+  DashboardSnapshot,
+  Suggestion,
+} from "@/types/dashboard";
 import type {
   CleanupExecutionMode,
   QuarantinePolicy,
 } from "@/types/cleanup-execution";
-import type { DashboardSection } from "@/types/navigation";
+import type { AppSection, DashboardSection } from "@/types/navigation";
+import type { AutomaticMaintenanceSchedule } from "@/types/operations";
+import { formatBytes } from "@/utils/format-bytes";
 
 /** Sidebar-selected dashboard subsection displayed by this shared workspace. */
 interface Props {
@@ -46,7 +53,8 @@ interface Props {
 
 /** Navigation intents produced by actions inside the dashboard. */
 interface Emits {
-  navigate: [section: DashboardSection];
+  /** Requests shell-level navigation from dashboard actions. */
+  navigate: [section: AppSection];
 }
 
 const props = withDefaults(defineProps<Props>(), { section: "overview" });
@@ -63,6 +71,8 @@ const scanRoot = shallowRef("C:\\");
 const scanMaxDepth = shallowRef(8);
 const scanMaxEntries = shallowRef(100_000);
 const excludedPaths = shallowRef("");
+const maintenanceSchedule =
+  shallowRef<AutomaticMaintenanceSchedule>("disabled");
 const {
   snapshot: spaceScan,
   history: spaceScanHistory,
@@ -115,6 +125,46 @@ const selectedDisk = computed(() => {
     snapshot.value.disks.find((disk) => disk.id === selectedDiskId.value) ??
     snapshot.value.disk
   );
+});
+const cleanupReclaimableBytes = computed(
+  () => cleanupPreview.value?.totalReclaimableBytes ?? 0,
+);
+const dashboardSuggestions = computed<Suggestion[]>(() => {
+  const candidates = cleanupPreview.value?.candidates;
+  if (candidates?.length) {
+    return candidates.slice(0, 3).map((candidate) => ({
+      id: candidate.id,
+      title: candidate.title,
+      description: candidate.description,
+      risk: candidate.risk,
+      reclaimableBytes: candidate.bytes,
+    }));
+  }
+  // Keep the server-provided recommendations as a compatibility fallback
+  // while a legacy provider returns an empty candidate list.
+  return snapshot.value?.suggestions ?? [];
+});
+const completedCleanupEvents = computed(() =>
+  auditEvents.value.filter((event) => event.kind === "executionCompleted"),
+);
+const lastCleanupLabel = computed(() => {
+  const event = completedCleanupEvents.value[0];
+  return event ? formatBytes(event.totalBytes) : "暂无记录";
+});
+const monthlyReleasedBytes = computed(() => {
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+  return completedCleanupEvents.value
+    .filter((event) => event.occurredAtUnixMs >= monthStart)
+    .reduce((total, event) => total + event.totalBytes, 0);
+});
+const maintenanceLabel = computed(() => {
+  const labels: Record<AutomaticMaintenanceSchedule, string> = {
+    disabled: "已关闭",
+    weekly: "每周",
+    monthly: "每月",
+  };
+  return labels[maintenanceSchedule.value];
 });
 const pageCopy = computed(() => {
   const copy: Record<DashboardSection, { title: string; description: string }> =
@@ -235,13 +285,20 @@ onMounted(() => void initializeDashboard());
 
 async function initializeDashboard(): Promise<void> {
   await refreshDashboard();
-  await Promise.allSettled([
-    refreshCleanupPreview(),
-    refreshSpaceScanHistory(),
-    refreshExecutionQuarantine(),
-    applySelectedVolumeScope(),
-  ]);
+  // Keep the shell interactive while the potentially expensive read-only
+  // cleanup scan runs. Navigation must never wait for filesystem discovery.
   await focusSection("auto");
+  void refreshCleanupPreview();
+  void refreshSpaceScanHistory();
+  void refreshExecutionQuarantine();
+  void applySelectedVolumeScope();
+  void getAppSettings()
+    .then((settings) => {
+      maintenanceSchedule.value = settings.automaticMaintenance;
+    })
+    .catch(() => {
+      // The dashboard remains truthful by showing the safe disabled state.
+    });
 }
 
 /** Scrolls the shared dashboard to the destination represented by the sidebar. */
@@ -290,7 +347,7 @@ async function focusSection(behavior: ScrollBehavior): Promise<void> {
       <div ref="overviewSection" class="dashboard-section">
         <DiskUsageCard
           :disk="selectedDisk ?? snapshot.disk"
-          :reclaimable-bytes="snapshot.cleanup.reclaimableBytes"
+          :reclaimable-bytes="cleanupReclaimableBytes"
           @open-cleanup="emit('navigate', 'cleanup')"
         />
         <DiskVolumeList
@@ -319,6 +376,15 @@ async function focusSection(behavior: ScrollBehavior): Promise<void> {
           @prepare-plan="preparePlan"
           @prepare-quarantine="createQuarantineIndex"
         />
+        <div
+          v-else-if="isCleanupLoading"
+          class="cleanup-loading"
+          role="status"
+          aria-live="polite"
+        >
+          <LoaderCircle class="spin" :size="18" aria-hidden="true" />
+          <span>正在读取清理候选，导航仍可用…</span>
+        </div>
 
         <CleanupExecutionPanel
           :plan="cleanupPlan"
@@ -358,7 +424,7 @@ async function focusSection(behavior: ScrollBehavior): Promise<void> {
 
       <div class="section-heading">
         <h2>状态概览</h2>
-        <button type="button">
+        <button type="button" @click="emit('navigate', 'history')">
           查看报告 <ChevronRight :size="15" aria-hidden="true" />
         </button>
       </div>
@@ -377,15 +443,15 @@ async function focusSection(behavior: ScrollBehavior): Promise<void> {
         />
         <MetricCard
           label="上次清理"
-          value="21.04 GB"
-          description="昨天 17:13 · 已安全完成"
+          :value="lastCleanupLabel"
+          description="来自本地审计记录"
           tone="blue"
           :icon="WandSparkles"
         />
         <MetricCard
           label="自动维护"
-          value="每周"
-          description="仅清理安全缓存"
+          :value="maintenanceLabel"
+          description="仅在安全条件满足时执行只读扫描"
           tone="orange"
           :icon="CalendarClock"
         />
@@ -393,14 +459,14 @@ async function focusSection(behavior: ScrollBehavior): Promise<void> {
 
       <div class="section-heading">
         <h2>智能建议</h2>
-        <button type="button">
+        <button type="button" @click="emit('navigate', 'cleanup')">
           全部建议 <ChevronRight :size="15" aria-hidden="true" />
         </button>
       </div>
       <div class="recommendations-grid">
         <div class="suggestions-panel">
           <SuggestionItem
-            v-for="suggestion in snapshot.suggestions"
+            v-for="suggestion in dashboardSuggestions"
             :key="suggestion.id"
             :suggestion="suggestion"
           />
@@ -410,8 +476,8 @@ async function focusSection(behavior: ScrollBehavior): Promise<void> {
             <span>本月累计释放</span
             ><TrendingUp :size="18" aria-hidden="true" />
           </div>
-          <strong>28.6 GB</strong>
-          <p>相当于约 7,300 张高清照片</p>
+          <strong>{{ formatBytes(monthlyReleasedBytes) }}</strong>
+          <p>来自本月已完成的本地审计记录</p>
         </aside>
       </div>
     </template>
@@ -532,12 +598,21 @@ async function focusSection(behavior: ScrollBehavior): Promise<void> {
   color: var(--color-text-secondary);
 }
 .loading-state,
-.error-state {
+.error-state,
+.cleanup-loading {
   min-height: 300px;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 18px;
+  color: var(--color-text-secondary);
+  background: var(--color-surface);
+}
+.cleanup-loading {
+  min-height: 120px;
+  margin-bottom: 14px;
   border: 1px solid var(--color-border);
   border-radius: 18px;
   color: var(--color-text-secondary);

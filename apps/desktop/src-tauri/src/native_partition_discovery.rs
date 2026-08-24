@@ -229,7 +229,11 @@ fn enumerate_volumes(
         let letter = char::from_u32(u32::from(b'A') + index).unwrap_or('C');
         let root = format!(r"{letter}:\");
         let device_path = format!(r"\\.\{letter}:");
-        let Some(handle) = open_device(&device_path) else {
+        // Volume metadata/device-number queries are allowed with zero desired
+        // access. Requesting GENERIC_READ here makes ordinary non-admin users
+        // receive ERROR_ACCESS_DENIED and silently drops otherwise valid D:/E:
+        // mappings from the topology.
+        let Some(handle) = open_volume_for_query(&device_path) else {
             continue;
         };
         let device_number = query_volume_device_number(handle);
@@ -430,11 +434,24 @@ fn query_disk_size(handle: HANDLE) -> Result<u64, std::io::Error> {
 }
 
 fn open_device(path: &str) -> Option<HANDLE> {
+    open_device_with_access(path, GENERIC_READ)
+}
+
+/// Opens a volume only for metadata IOCTLs without requesting read access.
+///
+/// Windows permits `CreateFileW` with desired access `0` for volume metadata
+/// discovery under a standard user token. This is intentionally separate from
+/// physical-disk layout reads, which still require `GENERIC_READ`.
+fn open_volume_for_query(path: &str) -> Option<HANDLE> {
+    open_device_with_access(path, 0)
+}
+
+fn open_device_with_access(path: &str, desired_access: u32) -> Option<HANDLE> {
     let path_wide = wide(path);
     let handle = unsafe {
         CreateFileW(
             path_wide.as_ptr(),
-            GENERIC_READ,
+            desired_access,
             FILE_SHARE_READ | FILE_SHARE_WRITE,
             std::ptr::null(),
             OPEN_EXISTING,

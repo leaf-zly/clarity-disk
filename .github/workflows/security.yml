@@ -34,12 +34,14 @@ jobs:
     name: Rust dependency audit
     runs-on: ubuntu-latest
     timeout-minutes: 8
+    permissions:
+      contents: read
+      issues: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Audit Cargo.lock
         uses: rustsec/audit-check@v2
-        # Keep the audit read-only. The repository grants this workflow only
-        # contents:read, so RustSec must not attempt to create Issues when it
-        # reports informational or unmaintained-dependency advisories.
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}

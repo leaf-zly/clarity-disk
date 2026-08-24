@@ -40,5 +40,6 @@ jobs:
 
       - name: Audit Cargo.lock
         uses: rustsec/audit-check@v2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+        # Keep the audit read-only. The repository grants this workflow only
+        # contents:read, so RustSec must not attempt to create Issues when it
+        # reports informational or unmaintained-dependency advisories.

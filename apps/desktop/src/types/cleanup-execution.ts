@@ -124,55 +124,6 @@ export interface UpdateQuarantinePolicyRequest {
   retentionDays: 7 | 15 | 30;
   maxBytes: number;
 }
-
-/** Bounded batch restore result with the latest persisted index. */
-export interface QuarantineRestoreBatchReport {
-  results: QuarantineRestoreResult[];
-  index: QuarantineExecutionIndex;
-}
-
-/** Fixed-tier policy update accepted by the restricted backend. */
-export interface UpdateQuarantinePolicyRequest {
-  retentionDays: 7 | 15 | 30;
-  maxBytes: number;
-}
-
-/** Bounded batch restore result with the latest persisted index. */
-export interface QuarantineRestoreBatchReport {
-  results: QuarantineRestoreResult[];
-  index: QuarantineExecutionIndex;
-}
-
-/** Fixed-tier policy update accepted by the restricted backend. */
-export interface UpdateQuarantinePolicyRequest {
-  retentionDays: 7 | 15 | 30;
-  maxBytes: number;
-}
-
-/** Bounded batch restore result with the latest persisted index. */
-export interface QuarantineRestoreBatchReport {
-  results: QuarantineRestoreResult[];
-  index: QuarantineExecutionIndex;
-}
-
-/** Fixed-tier policy update accepted by the restricted backend. */
-export interface UpdateQuarantinePolicyRequest {
-  retentionDays: 7 | 15 | 30;
-  maxBytes: number;
-}
-
-/** Bounded batch restore result with the latest persisted index. */
-export interface QuarantineRestoreBatchReport {
-  results: QuarantineRestoreResult[];
-  index: QuarantineExecutionIndex;
-}
-
-/** Fixed-tier policy update accepted by the restricted backend. */
-export interface UpdateQuarantinePolicyRequest {
-  retentionDays: 7 | 15 | 30;
-  maxBytes: number;
-}
-
 /** Input needed by browser fixtures to mirror a backend execution challenge. */
 export interface BrowserExecutionContext {
   plan: CleanupPlan;

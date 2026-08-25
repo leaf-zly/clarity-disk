@@ -85,6 +85,9 @@ function categoryWidth(category: DiskCategory): string {
           {{ category.label }} {{ formatBytes(category.bytes, 1) }}
         </span>
       </div>
+      <p v-if="disk.categories.length === 0" class="classification-note">
+        已使用空间尚未分类；运行空间分析后查看目录明细
+      </p>
 
       <div class="available-row">
         <span>可用空间</span>
@@ -219,6 +222,12 @@ function categoryWidth(category: DiskCategory): string {
   display: inline-flex;
   align-items: center;
   gap: 7px;
+}
+
+.classification-note {
+  margin-top: 14px;
+  color: var(--color-text-secondary);
+  font-size: 0.82rem;
 }
 
 .legend-dot {

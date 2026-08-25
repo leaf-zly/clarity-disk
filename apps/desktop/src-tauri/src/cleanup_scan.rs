@@ -3,7 +3,7 @@
 use std::fmt::Write;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::cleanup_adapters::allowed_roots;
 use clarity_core::{
@@ -18,6 +18,8 @@ const USER_TEMP_RULE_ID: &str = "user-temp.v1";
 const RECYCLE_BIN_RULE_ID: &str = "recycle-bin.v1";
 const BUILD_CACHE_RULE_ID: &str = "build-cache.v1";
 const WINDOWS_UPDATE_CACHE_RULE_ID: &str = "windows-update-download-cache.v1";
+const MAX_SCAN_DURATION: Duration = Duration::from_secs(15);
+const MAX_SCANNED_ITEMS: u64 = 250_000;
 
 // Rule definitions intentionally combine independent policy dimensions;
 // splitting them would make every rule constructor harder to audit.
@@ -65,6 +67,7 @@ pub fn scan_cleanup_preview() -> Result<CleanupPreview, CleanupScanError> {
     let mut rule_statuses = Vec::new();
     let mut scanned_items = 0_u64;
     let mut skipped_items = 0_u64;
+    let mut budget = ScanBudget::new();
 
     for rule in cleanup_rules() {
         if rule.paths.is_empty() {
@@ -83,7 +86,12 @@ pub fn scan_cleanup_preview() -> Result<CleanupPreview, CleanupScanError> {
         let existing_roots: Vec<_> = rule.paths.iter().filter(|path| path.exists()).collect();
 
         for path in &existing_roots {
-            match measure_tree(path, &mut scanned_items, &mut skipped_items) {
+            match measure_tree_with_budget(
+                path,
+                &mut scanned_items,
+                &mut skipped_items,
+                &mut budget,
+            ) {
                 Ok(measurement) => {
                     readable_root = true;
                     bytes = bytes
@@ -309,6 +317,45 @@ fn measure_tree(
     scanned_items: &mut u64,
     skipped_items: &mut u64,
 ) -> Result<TreeMeasurement, CleanupScanError> {
+    let mut budget = ScanBudget::new();
+    measure_tree_with_budget(root, scanned_items, skipped_items, &mut budget)
+}
+
+/// Enforces a finite scan budget so a locked or unusually large cache cannot
+/// leave the UI in an indeterminate loading state forever.
+struct ScanBudget {
+    started_at: Instant,
+}
+
+impl ScanBudget {
+    fn new() -> Self {
+        Self {
+            started_at: Instant::now(),
+        }
+    }
+
+    fn check(&self, scanned_items: u64) -> Result<(), CleanupScanError> {
+        if self.started_at.elapsed() >= MAX_SCAN_DURATION {
+            return Err(CleanupScanError::BudgetExceeded {
+                reason: format!("清理扫描超过 {} 秒上限", MAX_SCAN_DURATION.as_secs()),
+            });
+        }
+        if scanned_items >= MAX_SCANNED_ITEMS {
+            return Err(CleanupScanError::BudgetExceeded {
+                reason: format!("清理扫描超过 {MAX_SCANNED_ITEMS} 个项目上限"),
+            });
+        }
+        Ok(())
+    }
+}
+
+fn measure_tree_with_budget(
+    root: &Path,
+    scanned_items: &mut u64,
+    skipped_items: &mut u64,
+    budget: &mut ScanBudget,
+) -> Result<TreeMeasurement, CleanupScanError> {
+    budget.check(*scanned_items)?;
     let metadata = fs::symlink_metadata(root).map_err(|source| CleanupScanError::Read {
         path: root.to_path_buf(),
         source,
@@ -364,7 +411,7 @@ fn measure_tree(
             *skipped_items = skipped_items.saturating_add(1);
             continue;
         }
-        match measure_tree(&path, scanned_items, skipped_items) {
+        match measure_tree_with_budget(&path, scanned_items, skipped_items, budget) {
             Ok(measurement) => {
                 total_bytes = total_bytes
                     .checked_add(measurement.bytes)
@@ -449,6 +496,12 @@ pub enum CleanupScanError {
     /// The domain rejected the generated preview.
     #[error("invalid cleanup preview: {0}")]
     Preview(#[from] CleanupError),
+    /// Scan exceeded a bounded duration or item count.
+    #[error("cleanup scan budget exceeded: {reason}")]
+    BudgetExceeded {
+        /// User-facing explanation of the bound that was reached.
+        reason: String,
+    },
 }
 
 #[cfg(test)]

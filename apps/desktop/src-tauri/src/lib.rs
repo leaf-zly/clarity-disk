@@ -1,6 +1,6 @@
 //! Tauri command adapter for the Clarity Disk desktop application.
 
-use clarity_core::{CleanupSummary, DashboardSnapshot, DiskHealth, Suggestion, SuggestionRisk};
+use clarity_core::{CleanupSummary, DashboardSnapshot, DiskHealth};
 use std::sync::OnceLock;
 use std::time::Instant;
 
@@ -38,9 +38,6 @@ static PRIVILEGED_WORKFLOW: OnceLock<privileged_workflow::PrivilegedWorkflow> = 
 static SETTINGS: OnceLock<settings_store::SettingsStore> = OnceLock::new();
 static AUTOMATIC_MAINTENANCE: OnceLock<automatic_maintenance::AutomaticMaintenanceCoordinator> =
     OnceLock::new();
-
-const GIB: u64 = 1024 * 1024 * 1024;
-const MIB: u64 = 1024 * 1024;
 
 /// Runs blocking Windows discovery or filesystem work outside Tauri's command
 /// dispatch thread so navigation and repainting remain responsive.
@@ -88,32 +85,16 @@ fn build_dashboard_snapshot() -> Result<DashboardSnapshot, String> {
         disks,
         health,
         cleanup: CleanupSummary {
-            reclaimable_bytes: GIB + 860 * MIB,
-            category_count: 3,
+            // Cleanup candidates are produced by the dedicated scanner below;
+            // returning invented estimates here would make the dashboard claim
+            // that files exist before any evidence has been collected.
+            reclaimable_bytes: 0,
+            category_count: 0,
         },
-        suggestions: vec![
-            Suggestion {
-                id: "hibernation".to_owned(),
-                title: "休眠文件占用较大".to_owned(),
-                description: "若不使用休眠，可释放 12.74 GB".to_owned(),
-                risk: SuggestionRisk::ConfirmationRequired,
-                reclaimable_bytes: 12 * GIB + 758 * MIB,
-            },
-            Suggestion {
-                id: "browser-cache".to_owned(),
-                title: "浏览器缓存".to_owned(),
-                description: "Chrome 与 Edge 共 454 MB".to_owned(),
-                risk: SuggestionRisk::Safe,
-                reclaimable_bytes: 454 * MIB,
-            },
-            Suggestion {
-                id: "recycle-bin".to_owned(),
-                title: "回收站".to_owned(),
-                description: "3,700 个文件，共 389 MB".to_owned(),
-                risk: SuggestionRisk::Review,
-                reclaimable_bytes: 389 * MIB,
-            },
-        ],
+        // Recommendations are populated from the evidence-bearing cleanup
+        // preview in the frontend. An empty list is more truthful than demo
+        // values when the scan has not completed or has failed.
+        suggestions: Vec::new(),
     };
     diagnostics::record_performance("dashboardDiscovery", started.elapsed());
     Ok(snapshot)

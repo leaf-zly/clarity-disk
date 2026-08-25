@@ -2,9 +2,7 @@
 
 use std::path::Path;
 
-use clarity_core::{
-    DashboardError, DiskCategory, DiskCategoryKind, DiskMetadata, DiskSummary, VolumeHealthStatus,
-};
+use clarity_core::{DashboardError, DiskMetadata, DiskSummary, VolumeHealthStatus};
 use sysinfo::Disks;
 
 /// Discovers every mounted logical volume using read-only operating system
@@ -36,20 +34,15 @@ pub fn discover_disks() -> Result<Vec<DiskSummary>, DiscoveryError> {
             } else {
                 format!("{} · 本地磁盘 ({id})", volume_name.trim())
             };
-            let categories = (used_bytes > 0).then(|| DiskCategory {
-                // A detailed category scan is the next product slice. Until
-                // then, keep occupied bytes visibly unclassified.
-                kind: DiskCategoryKind::System,
-                label: "待详细扫描".to_owned(),
-                bytes: used_bytes,
-            });
-
             DiskSummary::try_new(
                 id,
                 label,
                 total_bytes,
                 used_bytes,
-                categories.into_iter().collect(),
+                // Capacity discovery does not inspect directory contents. Do
+                // not present the occupied bytes as a fake system category;
+                // the space-analysis page owns detailed classification.
+                Vec::new(),
             )
             .map(|summary| {
                 summary.with_metadata(DiskMetadata {

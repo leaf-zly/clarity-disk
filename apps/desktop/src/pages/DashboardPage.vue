@@ -167,6 +167,19 @@ const maintenanceLabel = computed(() => {
   };
   return labels[maintenanceSchedule.value];
 });
+/**
+ * Builds a truthful health summary without implying that missing telemetry is
+ * a clean bill of health.
+ */
+const healthDescription = computed(() => {
+  const health = snapshot.value?.health;
+  if (!health) return "正在读取健康信号";
+  const temperature = health.temperatureCelsius == null
+    ? "温度暂无数据"
+    : `${health.temperatureCelsius}°C`;
+  const warning = health.hasWarning ? "检测到需要注意的信号" : "未发现可用警告信号";
+  return `${health.deviceType} · ${temperature} · ${warning}`;
+});
 const pageCopy = computed(() => {
   const copy: Record<DashboardSection, { title: string; description: string }> =
     {
@@ -437,12 +450,7 @@ async function focusSection(behavior: ScrollBehavior): Promise<void> {
         <MetricCard
           label="磁盘健康"
           :value="snapshot.health.status"
-          :description="
-            snapshot.health.deviceType +
-            ' · ' +
-            (snapshot.health.temperatureCelsius ?? '—') +
-            '°C · 无异常'
-          "
+          :description="healthDescription"
           tone="green"
           :icon="HeartPulse"
         />

@@ -174,10 +174,13 @@ const maintenanceLabel = computed(() => {
 const healthDescription = computed(() => {
   const health = snapshot.value?.health;
   if (!health) return "正在读取健康信号";
-  const temperature = health.temperatureCelsius == null
-    ? "温度暂无数据"
-    : `${health.temperatureCelsius}°C`;
-  const warning = health.hasWarning ? "检测到需要注意的信号" : "未发现可用警告信号";
+  const temperature =
+    health.temperatureCelsius == null
+      ? "温度暂无数据"
+      : `${health.temperatureCelsius}°C`;
+  const warning = health.hasWarning
+    ? "检测到需要注意的信号"
+    : "未发现可用警告信号";
   return `${health.deviceType} · ${temperature} · ${warning}`;
 });
 const pageCopy = computed(() => {
@@ -631,7 +634,8 @@ async function focusSection(behavior: ScrollBehavior): Promise<void> {
   justify-content: center;
   gap: 12px;
   padding: 20px;
-  border: 1px solid color-mix(in srgb, var(--color-orange) 30%, var(--color-border));
+  border: 1px solid
+    color-mix(in srgb, var(--color-orange) 30%, var(--color-border));
   border-radius: 18px;
   color: var(--color-text-secondary);
   background: var(--color-surface);

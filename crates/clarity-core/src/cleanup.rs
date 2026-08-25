@@ -173,7 +173,8 @@ pub struct CleanupPlan {
     pub candidates: Vec<CleanupCandidate>,
     /// SHA-256 digest of the canonical plan payload.
     pub plan_digest: String,
-    /// Explicitly false until a separately reviewed executor is implemented.
+    /// Always false when a plan is first created; a separate one-time
+    /// confirmation is required before the restricted executor can run.
     pub execution_authorized: bool,
     /// Creation time in Unix milliseconds.
     pub created_at_unix_ms: u64,

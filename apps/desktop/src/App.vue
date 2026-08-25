@@ -102,7 +102,8 @@ onBeforeUnmount(() => {
 .preview-banner {
   margin: -12px 0 20px;
   padding: 9px 13px;
-  border: 1px solid color-mix(in srgb, var(--color-orange) 35%, var(--color-border));
+  border: 1px solid
+    color-mix(in srgb, var(--color-orange) 35%, var(--color-border));
   border-radius: 10px;
   color: var(--color-text-secondary);
   background: var(--color-orange-soft);

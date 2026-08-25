@@ -98,6 +98,28 @@ const capacityPercent = computed(() => {
     (props.quarantine.totalBytes / props.quarantine.policy.maxBytes) * 100,
   );
 });
+/** Summarizes per-item execution states without treating skipped work as success. */
+const executionSummary = computed(() => {
+  const results = props.report?.results ?? [];
+  const incomplete = results.filter(
+    (result) => result.status !== "staged",
+  ).length;
+  if (incomplete > 0) {
+    return {
+      tone: "warning",
+      title: `已完成 ${results.length - incomplete} 条，${incomplete} 条需要复核`,
+      detail: "部分项目被跳过或重新校验失败，未将其计入成功结果。",
+    } as const;
+  }
+  return {
+    tone: "success",
+    title:
+      props.report?.mode === "quarantine"
+        ? `本次隔离 ${formatBytes(props.report?.stagedBytes ?? 0)}`
+        : `已处理约 ${formatBytes(props.report?.estimatedProcessedBytes ?? 0)}`,
+    detail: `${results.length} 条规则完成，一次性令牌已消费`,
+  } as const;
+});
 
 watch(
   () => props.quarantine?.policy,
@@ -225,15 +247,21 @@ function submitPolicy(): void {
       </button>
     </div>
 
-    <div v-if="report" class="report-strip" role="status">
-      <CheckCircle2 :size="18" aria-hidden="true" />
+    <div
+      v-if="report"
+      class="report-strip"
+      :class="executionSummary.tone"
+      role="status"
+    >
+      <CheckCircle2
+        v-if="executionSummary.tone === 'success'"
+        :size="18"
+        aria-hidden="true"
+      />
+      <ShieldAlert v-else :size="18" aria-hidden="true" />
       <div>
-        <strong>{{
-          report.mode === "quarantine"
-            ? "本次隔离 " + formatBytes(report.stagedBytes)
-            : "已处理约 " + formatBytes(report.estimatedProcessedBytes)
-        }}</strong
-        ><span>{{ report.results.length }} 条规则完成，一次性令牌已消费</span>
+        <strong>{{ executionSummary.title }}</strong>
+        <span>{{ executionSummary.detail }}</span>
       </div>
       <code>authorized = {{ report.executionAuthorized }}</code>
     </div>
@@ -507,6 +535,10 @@ button:disabled {
   border-radius: 11px;
   color: var(--color-green);
   background: color-mix(in srgb, var(--color-green) 9%, var(--color-surface));
+}
+.report-strip.warning {
+  color: var(--color-orange);
+  background: color-mix(in srgb, var(--color-orange) 10%, var(--color-surface));
 }
 .report-strip > div {
   display: grid;

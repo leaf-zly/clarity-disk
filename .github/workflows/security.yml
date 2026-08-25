@@ -45,4 +45,6 @@ jobs:
         run: cargo install cargo-audit --locked
 
       - name: Audit Cargo.lock
-        run: cargo audit --locked
+        # cargo-audit validates Cargo.lock itself; unlike Cargo commands, the
+        # audit subcommand does not accept a `--locked` flag.
+        run: cargo audit

@@ -312,15 +312,6 @@ fn build_cache_paths(local_app_data: &Path) -> Vec<PathBuf> {
     allowed_roots(BUILD_CACHE_RULE_ID)
 }
 
-fn measure_tree(
-    root: &Path,
-    scanned_items: &mut u64,
-    skipped_items: &mut u64,
-) -> Result<TreeMeasurement, CleanupScanError> {
-    let mut budget = ScanBudget::new();
-    measure_tree_with_budget(root, scanned_items, skipped_items, &mut budget)
-}
-
 /// Enforces a finite scan budget so a locked or unusually large cache cannot
 /// leave the UI in an indeterminate loading state forever.
 struct ScanBudget {
@@ -509,7 +500,10 @@ mod tests {
     use std::fs;
     use std::path::Path;
 
-    use super::{WINDOWS_UPDATE_CACHE_RULE_ID, cleanup_rules, is_allowed_path, measure_tree};
+    use super::{
+        ScanBudget, WINDOWS_UPDATE_CACHE_RULE_ID, cleanup_rules, is_allowed_path,
+        measure_tree_with_budget,
+    };
     use clarity_core::SuggestionRisk;
 
     fn test_root(name: &str) -> std::path::PathBuf {
@@ -530,8 +524,9 @@ mod tests {
         fs::write(root.join("nested/two.tmp"), b"12").expect("file should be written");
         let mut scanned = 0;
         let mut skipped = 0;
-        let result =
-            measure_tree(&root, &mut scanned, &mut skipped).expect("test tree should be readable");
+        let mut budget = ScanBudget::new();
+        let result = measure_tree_with_budget(&root, &mut scanned, &mut skipped, &mut budget)
+            .expect("test tree should be readable");
         assert_eq!(result.bytes, 6);
         assert_eq!(result.items, 2);
         assert_eq!(

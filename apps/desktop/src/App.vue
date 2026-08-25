@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, KeepAlive, onBeforeUnmount, onMounted, ref } from "vue";
+import { isTauri } from "@tauri-apps/api/core";
 
 import AppSidebar from "@/components/AppSidebar.vue";
 import DashboardPage from "@/pages/DashboardPage.vue";
@@ -18,6 +19,7 @@ import {
 import { isDashboardSection, type AppSection } from "@/types/navigation";
 
 const activeSection = ref<AppSection>("overview");
+const isBrowserPreview = !isTauri();
 const dashboardSection = computed(() =>
   isDashboardSection(activeSection.value) ? activeSection.value : undefined,
 );
@@ -47,6 +49,9 @@ onBeforeUnmount(() => {
   <div class="app-shell">
     <AppSidebar v-model:active-section="activeSection" />
     <main class="app-content">
+      <div v-if="isBrowserPreview" class="preview-banner" role="status">
+        浏览器预览模式：显示的是演示数据，不会读取或修改本机文件。
+      </div>
       <KeepAlive :max="8">
         <DashboardPage
           v-if="dashboardSection"
@@ -92,6 +97,16 @@ onBeforeUnmount(() => {
 .app-content {
   min-width: 0;
   padding: 34px 38px 44px;
+}
+
+.preview-banner {
+  margin: -12px 0 20px;
+  padding: 9px 13px;
+  border: 1px solid color-mix(in srgb, var(--color-orange) 35%, var(--color-border));
+  border-radius: 10px;
+  color: var(--color-text-secondary);
+  background: var(--color-orange-soft);
+  font-size: 0.84rem;
 }
 
 @media (max-width: 900px) {

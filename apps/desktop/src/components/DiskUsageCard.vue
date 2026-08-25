@@ -10,7 +10,8 @@ import { formatBytes } from "@/utils/format-bytes";
  */
 interface Props {
   disk: DiskSummary;
-  reclaimableBytes: number;
+  /** Evidence-backed reclaimable bytes; null means the scan is unavailable. */
+  reclaimableBytes: number | null;
 }
 
 /**
@@ -105,9 +106,15 @@ function categoryWidth(category: DiskCategory): string {
           <Sparkles :size="18" aria-hidden="true" />
         </div>
         <strong class="cleanup-value">{{
-          formatBytes(reclaimableBytes)
+          reclaimableBytes === null ? "—" : formatBytes(reclaimableBytes)
         }}</strong>
-        <p>缓存与临时内容，可安全释放</p>
+        <p>
+          {{
+            reclaimableBytes === null
+              ? "完成清理扫描后显示"
+              : "缓存与临时内容，可安全释放"
+          }}
+        </p>
       </div>
       <button type="button" @click="emit('open-cleanup')">查看清理项目</button>
     </aside>

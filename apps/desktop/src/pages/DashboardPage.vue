@@ -127,8 +127,8 @@ const selectedDisk = computed(() => {
     snapshot.value.disk
   );
 });
-const cleanupReclaimableBytes = computed(
-  () => cleanupPreview.value?.totalReclaimableBytes ?? 0,
+const cleanupReclaimableBytes = computed<number | null>(
+  () => cleanupPreview.value?.totalReclaimableBytes ?? null,
 );
 const dashboardSuggestions = computed<Suggestion[]>(() => {
   const candidates = cleanupPreview.value?.candidates;
@@ -386,6 +386,10 @@ async function focusSection(behavior: ScrollBehavior): Promise<void> {
           <LoaderCircle class="spin" :size="18" aria-hidden="true" />
           <span>正在读取清理候选，导航仍可用…</span>
         </div>
+        <div v-else-if="cleanupError" class="cleanup-error" role="alert">
+          <span>{{ cleanupError }}</span>
+          <button type="button" @click="refreshCleanupPreview">重试扫描</button>
+        </div>
 
         <CleanupExecutionPanel
           :plan="cleanupPlan"
@@ -610,6 +614,26 @@ async function focusSection(behavior: ScrollBehavior): Promise<void> {
   border-radius: 18px;
   color: var(--color-text-secondary);
   background: var(--color-surface);
+}
+.cleanup-error {
+  min-height: 120px;
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 20px;
+  border: 1px solid color-mix(in srgb, var(--color-orange) 30%, var(--color-border));
+  border-radius: 18px;
+  color: var(--color-text-secondary);
+  background: var(--color-surface);
+  text-align: center;
+}
+.cleanup-error button {
+  border: 0;
+  color: var(--color-blue);
+  background: transparent;
+  cursor: pointer;
 }
 .cleanup-loading {
   min-height: 120px;

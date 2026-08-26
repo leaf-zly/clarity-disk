@@ -4,21 +4,21 @@ packages:
 catalog:
   "@tauri-apps/api": 2.11.1
   "@tauri-apps/cli": 2.11.4
-  "@types/node": 24.10.13
+  "@types/node": 26.2.0
   "@vitejs/plugin-vue": 6.0.8
   "@vitest/coverage-v8": 4.1.10
   "@vue/test-utils": 2.4.11
-  "happy-dom": 20.11.2
-  "@lucide/vue": 1.31.0
-  "@oxlint/binding-win32-x64-msvc": 1.78.0
-  "oxlint": 1.78.0
-  "@rolldown/binding-win32-x64-msvc": 1.2.3
-  "typescript": 5.9.3
-  "vite": 8.2.1
+  "happy-dom": 20.11.6
+  "@lucide/vue": 1.33.0
+  "@oxlint/binding-win32-x64-msvc": 1.79.0
+  "oxlint": 1.79.0
+  "@rolldown/binding-win32-x64-msvc": 1.2.5
+  "typescript": 7.0.2
+  "vite": 8.2.2
   "vitest": 4.1.10
   "vue": 3.5.41
   "vue-router": 5.2.0
-  "vue-tsc": 3.3.9
+  "vue-tsc": 3.3.11
 
 settings:
   linkWorkspacePackages: true

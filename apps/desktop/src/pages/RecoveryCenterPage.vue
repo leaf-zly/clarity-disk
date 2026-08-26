@@ -24,6 +24,7 @@ const destination = ref<QuarantineRestoreDestination>("original");
 const challenge = shallowRef<QuarantineDeletionChallenge | null>(null);
 const confirmation = ref("");
 const busy = ref(false);
+const isRefreshing = ref(false);
 const errorMessage = ref("");
 const notice = ref("");
 const retentionDays = ref<7 | 15 | 30>(30);
@@ -38,17 +39,28 @@ const recoverableEntries = computed(
     ) ?? [],
 );
 
-/** Reloads backend-owned quarantine state and reconciles the local selection. */
+/**
+ * Reloads backend-owned quarantine state and reconciles the local selection.
+ * Read failures remain recoverable and are surfaced without exposing backend details.
+ */
 async function refresh(): Promise<void> {
+  if (isRefreshing.value) return;
+  isRefreshing.value = true;
   errorMessage.value = "";
-  index.value = await getExecutionQuarantineIndex();
-  selectedIds.value = selectedIds.value.filter((entryId) =>
-    recoverableEntries.value.some((entry) => entry.entryId === entryId),
-  );
-  if (index.value) {
-    retentionDays.value = index.value.policy.retentionDays;
-    capacityGiB.value = (index.value.policy.maxBytes / 1024 ** 3) as
-      1 | 5 | 10 | 20;
+  try {
+    index.value = await getExecutionQuarantineIndex();
+    selectedIds.value = selectedIds.value.filter((entryId) =>
+      recoverableEntries.value.some((entry) => entry.entryId === entryId),
+    );
+    if (index.value) {
+      retentionDays.value = index.value.policy.retentionDays;
+      capacityGiB.value = (index.value.policy.maxBytes / 1024 ** 3) as
+        1 | 5 | 10 | 20;
+    }
+  } catch {
+    errorMessage.value = "隔离区状态暂时无法读取，请稍后重试。";
+  } finally {
+    isRefreshing.value = false;
   }
 }
 
@@ -148,8 +160,18 @@ onMounted(() => void refresh());
           所有操作只使用后端条目标识；恢复不覆盖，永久删除需再次确认。
         </p>
       </div>
-      <button class="secondary" type="button" :disabled="busy" @click="refresh">
-        <RefreshCw :size="16" aria-hidden="true" />刷新
+      <button
+        class="secondary"
+        type="button"
+        :disabled="busy || isRefreshing"
+        @click="refresh"
+      >
+        <RefreshCw
+          :class="{ spin: isRefreshing }"
+          :size="16"
+          aria-hidden="true"
+        />
+        {{ isRefreshing ? "刷新中" : "刷新" }}
       </button>
     </header>
 
@@ -179,7 +201,15 @@ onMounted(() => void refresh());
         </div>
         <span>{{ selectedIds.length }} 项已选择</span>
       </div>
-      <div v-if="!recoverableEntries.length" class="empty">
+      <div v-if="isRefreshing && !index" class="empty" aria-live="polite">
+        <RefreshCw class="spin" :size="32" aria-hidden="true" />
+        <strong>正在读取隔离区</strong>
+        <span>只读取本机隔离索引，不会修改文件。</span>
+      </div>
+      <div
+        v-else-if="!recoverableEntries.length && !errorMessage"
+        class="empty"
+      >
         <ArchiveRestore :size="32" aria-hidden="true" />
         <strong>当前没有可恢复项目</strong>
         <span>执行受限清理后，项目会出现在这里。</span>
@@ -437,6 +467,14 @@ button {
 button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+.spin {
+  animation: spin 0.85s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 .primary {
   border: 0;

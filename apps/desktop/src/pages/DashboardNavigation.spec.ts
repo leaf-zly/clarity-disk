@@ -38,13 +38,12 @@ vi.mock("@/services/dashboard-service", () => ({
 }));
 
 describe("DashboardPage navigation", () => {
-  it("switches destinations without remounting the shared workspace", async () => {
-    const wrapper = mount(DashboardPage, { props: { section: "space" } });
+  it("renders each destination as an isolated view without remounting", async () => {
+    const wrapper = mount(DashboardPage, { props: { section: "overview" } });
     await flushPromises();
-    expect(wrapper.get("h1").text()).toBe("空间分析");
-
-    await wrapper.setProps({ section: "cleanup" });
-    expect(wrapper.get("h1").text()).toBe("智能清理");
+    expect(wrapper.get("h1").text()).toBe("下午好");
+    expect(wrapper.text()).toContain("磁盘与卷");
+    expect(wrapper.text()).not.toContain("扫描范围");
 
     const cleanupButton = wrapper
       .findAll("button")
@@ -64,5 +63,16 @@ describe("DashboardPage navigation", () => {
       .find((button) => button.text().includes("全部建议"))
       ?.trigger("click");
     expect(wrapper.emitted("navigate")?.at(-1)).toEqual(["cleanup"]);
+
+    await wrapper.setProps({ section: "space" });
+    expect(wrapper.get("h1").text()).toBe("空间分析");
+    expect(wrapper.text()).toContain("扫描范围");
+    expect(wrapper.text()).not.toContain("磁盘与卷");
+
+    await wrapper.setProps({ section: "cleanup" });
+    await flushPromises();
+    expect(wrapper.get("h1").text()).toBe("智能清理");
+    expect(wrapper.text()).toContain("安全清理中心");
+    expect(wrapper.text()).not.toContain("扫描范围");
   });
 });

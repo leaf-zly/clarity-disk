@@ -2,7 +2,11 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import SettingsPage from "@/pages/SettingsPage.vue";
-import { updateAppSettings } from "@/services/operations-service";
+import {
+  clearCrashDiagnostics,
+  getDiagnosticsSnapshot,
+  updateAppSettings,
+} from "@/services/operations-service";
 
 const settings = {
   schemaVersion: 1 as const,
@@ -42,6 +46,12 @@ vi.mock("@/services/operations-service", () => ({
 describe("SettingsPage", () => {
   beforeEach(() => {
     vi.mocked(updateAppSettings).mockImplementation(async (value) => value);
+    vi.mocked(clearCrashDiagnostics).mockResolvedValue(undefined);
+    vi.mocked(getDiagnosticsSnapshot).mockResolvedValue({
+      crashReports: [],
+      performanceMetrics: [],
+      retentionEnabled: true,
+    });
   });
 
   it("shows privacy-first automatic maintenance and release protections", async () => {
@@ -67,5 +77,39 @@ describe("SettingsPage", () => {
     expect(wrapper.get('[role="alert"]').text()).toBe(
       "Windows 登录启动设置保存失败，其他设置未更改。",
     );
+  });
+
+  it("keeps diagnostics cleanup recoverable when the backend rejects it", async () => {
+    vi.mocked(getDiagnosticsSnapshot).mockResolvedValue({
+      crashReports: [
+        {
+          reportId: "crash-1",
+          appVersion: "0.1.0",
+          occurredAtUnixMs: 1,
+          sourceFile: null,
+          sourceLine: null,
+          classification: "panic",
+        },
+      ],
+      performanceMetrics: [],
+      retentionEnabled: true,
+    });
+    vi.mocked(clearCrashDiagnostics).mockRejectedValueOnce(
+      new Error("diagnostics store unavailable"),
+    );
+    const wrapper = mount(SettingsPage);
+    await flushPromises();
+
+    const clearButton = wrapper
+      .findAll("button")
+      .find((button) => button.text().includes("清除崩溃标记"));
+    expect(clearButton?.attributes("disabled")).toBeUndefined();
+    await clearButton?.trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get('[role="alert"]').text()).toBe(
+      "本地崩溃标记清除失败，请稍后重试。",
+    );
+    expect(clearButton?.attributes("disabled")).toBeUndefined();
   });
 });

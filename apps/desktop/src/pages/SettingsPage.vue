@@ -134,9 +134,18 @@ async function checkUpdate(): Promise<void> {
 }
 
 async function clearDiagnostics(): Promise<void> {
-  await clearCrashDiagnostics();
-  diagnostics.value = await getDiagnosticsSnapshot();
-  message.value = "本地崩溃标记已清除。";
+  busy.value = true;
+  message.value = "";
+  errorMessage.value = "";
+  try {
+    await clearCrashDiagnostics();
+    diagnostics.value = await getDiagnosticsSnapshot();
+    message.value = "本地崩溃标记已清除。";
+  } catch {
+    errorMessage.value = "本地崩溃标记清除失败，请稍后重试。";
+  } finally {
+    busy.value = false;
+  }
 }
 
 function settingsSaveError(error: unknown): string {
@@ -283,7 +292,7 @@ onMounted(() => void load());
           <button
             class="secondary"
             type="button"
-            :disabled="!diagnostics?.crashReports.length"
+            :disabled="busy || !diagnostics?.crashReports.length"
             @click="clearDiagnostics"
           >
             <Trash2 :size="15" />清除崩溃标记

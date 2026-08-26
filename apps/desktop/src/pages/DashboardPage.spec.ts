@@ -61,7 +61,7 @@ describe("DashboardPage", () => {
     expect(wrapper.text()).toContain("可安全清理");
     expect(wrapper.text()).toContain("磁盘与卷");
     expect(wrapper.text()).toContain("资料 · 本地磁盘 (D:)");
-    expect(wrapper.text()).toContain("空间分析");
+    expect(wrapper.text()).not.toContain("扫描范围");
   });
 
   it("offers a retry when disk discovery fails", async () => {

@@ -1,13 +1,5 @@
 <script setup lang="ts">
-import {
-  computed,
-  nextTick,
-  onMounted,
-  shallowRef,
-  toRaw,
-  useTemplateRef,
-  watch,
-} from "vue";
+import { computed, onMounted, shallowRef, toRaw, watch } from "vue";
 import {
   CalendarClock,
   ChevronRight,
@@ -60,9 +52,6 @@ interface Emits {
 
 const props = withDefaults(defineProps<Props>(), { section: "overview" });
 const emit = defineEmits<Emits>();
-const overviewSection = useTemplateRef<HTMLElement>("overviewSection");
-const cleanupSection = useTemplateRef<HTMLElement>("cleanupSection");
-const spaceSection = useTemplateRef<HTMLElement>("spaceSection");
 
 const snapshot = shallowRef<DashboardSnapshot>();
 const loadError = shallowRef<string>();
@@ -79,6 +68,7 @@ const {
   history: spaceScanHistory,
   error: spaceScanError,
   isStarting: isStartingSpaceScan,
+  isActive: isSpaceScanActive,
   start: startScan,
   pause: pauseScan,
   resume: resumeScan,
@@ -205,6 +195,18 @@ const pageCopy = computed(() => {
     };
   return copy[props.section];
 });
+const primaryActionBusy = computed(() => {
+  if (props.section === "cleanup") return isCleanupLoading.value;
+  if (["space", "large-files"].includes(props.section))
+    return isStartingSpaceScan.value || isSpaceScanActive.value;
+  return isLoading.value;
+});
+const primaryActionLabel = computed(() => {
+  if (primaryActionBusy.value) return "正在扫描";
+  if (props.section === "cleanup") return "重新扫描清理项";
+  if (["space", "large-files"].includes(props.section)) return "开始空间分析";
+  return "刷新磁盘信息";
+});
 
 /** Refreshes dashboard discovery while preserving user-readable errors. */
 async function refreshDashboard(): Promise<void> {
@@ -232,6 +234,19 @@ async function startSpaceAnalysis(): Promise<void> {
     maxEntries: scanMaxEntries.value,
     excludedPaths: excluded,
   });
+}
+
+/** Runs the section-specific primary scan instead of a generic no-op refresh. */
+async function runPrimaryAction(): Promise<void> {
+  if (props.section === "cleanup") {
+    await refreshCleanupPreview();
+    return;
+  }
+  if (["space", "large-files"].includes(props.section)) {
+    await startSpaceAnalysis();
+    return;
+  }
+  await refreshDashboard();
 }
 
 /** Applies backend-generated defaults when the selected volume changes. */
@@ -292,19 +307,12 @@ async function restoreCleanupEntry(entryId: string): Promise<void> {
 }
 
 watch(selectedDiskId, () => void applySelectedVolumeScope());
-watch(
-  () => props.section,
-  () => void focusSection("smooth"),
-  { flush: "post" },
-);
-
 onMounted(() => void initializeDashboard());
 
 async function initializeDashboard(): Promise<void> {
   await refreshDashboard();
-  // Keep the shell interactive while the potentially expensive read-only
-  // cleanup scan runs. Navigation must never wait for filesystem discovery.
-  await focusSection("auto");
+  // Keep the shell interactive while potentially expensive read-only work
+  // runs. Section navigation is render-driven and never waits for discovery.
   void refreshCleanupPreview();
   void refreshSpaceScanHistory();
   void refreshExecutionQuarantine();
@@ -316,18 +324,6 @@ async function initializeDashboard(): Promise<void> {
     .catch(() => {
       // The dashboard remains truthful by showing the safe disabled state.
     });
-}
-
-/** Scrolls the shared dashboard to the destination represented by the sidebar. */
-async function focusSection(behavior: ScrollBehavior): Promise<void> {
-  await nextTick();
-  const target =
-    props.section === "overview"
-      ? overviewSection.value
-      : props.section === "cleanup"
-        ? cleanupSection.value
-        : spaceSection.value;
-  target?.scrollIntoView?.({ behavior, block: "start" });
 }
 </script>
 
@@ -341,17 +337,17 @@ async function focusSection(behavior: ScrollBehavior): Promise<void> {
       <button
         class="scan-button"
         type="button"
-        :disabled="isLoading"
-        @click="refreshDashboard"
+        :disabled="primaryActionBusy"
+        @click="runPrimaryAction"
       >
         <LoaderCircle
-          v-if="isLoading"
+          v-if="primaryActionBusy"
           class="spin"
           :size="18"
           aria-hidden="true"
         />
         <ScanSearch v-else :size="18" aria-hidden="true" />
-        {{ isLoading ? "正在扫描" : "开始智能扫描" }}
+        {{ primaryActionLabel }}
       </button>
     </header>
 
@@ -361,7 +357,7 @@ async function focusSection(behavior: ScrollBehavior): Promise<void> {
     </div>
 
     <template v-else-if="snapshot">
-      <div ref="overviewSection" class="dashboard-section">
+      <div v-if="props.section === 'overview'" class="dashboard-section">
         <DiskUsageCard
           :disk="selectedDisk ?? snapshot.disk"
           :reclaimable-bytes="cleanupReclaimableBytes"
@@ -372,9 +368,62 @@ async function focusSection(behavior: ScrollBehavior): Promise<void> {
           :active-disk-id="selectedDiskId ?? snapshot.disk.id"
           @select-disk="(disk) => (selectedDiskId = disk.id)"
         />
+        <div class="section-heading">
+          <h2>状态概览</h2>
+          <button type="button" @click="emit('navigate', 'history')">
+            查看报告 <ChevronRight :size="15" aria-hidden="true" />
+          </button>
+        </div>
+        <div class="metrics-grid">
+          <MetricCard
+            label="磁盘健康"
+            :value="snapshot.health.status"
+            :description="healthDescription"
+            tone="green"
+            :icon="HeartPulse"
+          />
+          <MetricCard
+            label="上次清理"
+            :value="lastCleanupLabel"
+            description="来自本地审计记录"
+            tone="blue"
+            :icon="WandSparkles"
+          />
+          <MetricCard
+            label="自动维护"
+            :value="maintenanceLabel"
+            description="仅在安全条件满足时执行只读扫描"
+            tone="orange"
+            :icon="CalendarClock"
+          />
+        </div>
+
+        <div class="section-heading">
+          <h2>智能建议</h2>
+          <button type="button" @click="emit('navigate', 'cleanup')">
+            全部建议 <ChevronRight :size="15" aria-hidden="true" />
+          </button>
+        </div>
+        <div class="recommendations-grid">
+          <div class="suggestions-panel">
+            <SuggestionItem
+              v-for="suggestion in dashboardSuggestions"
+              :key="suggestion.id"
+              :suggestion="suggestion"
+            />
+          </div>
+          <aside class="monthly-card">
+            <div class="monthly-label">
+              <span>本月累计释放</span
+              ><TrendingUp :size="18" aria-hidden="true" />
+            </div>
+            <strong>{{ formatBytes(monthlyReleasedBytes) }}</strong>
+            <p>来自本月已完成的本地审计记录</p>
+          </aside>
+        </div>
       </div>
 
-      <div ref="cleanupSection" class="dashboard-section">
+      <div v-else-if="props.section === 'cleanup'" class="dashboard-section">
         <CleanupPreviewPanel
           v-if="cleanupPreview"
           :preview="cleanupPreview"
@@ -426,7 +475,7 @@ async function focusSection(behavior: ScrollBehavior): Promise<void> {
         />
       </div>
 
-      <div ref="spaceSection" class="dashboard-section">
+      <div v-else class="dashboard-section">
         <SpaceScanPanel
           :snapshot="spaceScan"
           :history="spaceScanHistory"
@@ -441,60 +490,6 @@ async function focusSection(behavior: ScrollBehavior): Promise<void> {
           @resume-scan="resumeScan"
           @cancel-scan="cancelScan"
         />
-      </div>
-
-      <div class="section-heading">
-        <h2>状态概览</h2>
-        <button type="button" @click="emit('navigate', 'history')">
-          查看报告 <ChevronRight :size="15" aria-hidden="true" />
-        </button>
-      </div>
-      <div class="metrics-grid">
-        <MetricCard
-          label="磁盘健康"
-          :value="snapshot.health.status"
-          :description="healthDescription"
-          tone="green"
-          :icon="HeartPulse"
-        />
-        <MetricCard
-          label="上次清理"
-          :value="lastCleanupLabel"
-          description="来自本地审计记录"
-          tone="blue"
-          :icon="WandSparkles"
-        />
-        <MetricCard
-          label="自动维护"
-          :value="maintenanceLabel"
-          description="仅在安全条件满足时执行只读扫描"
-          tone="orange"
-          :icon="CalendarClock"
-        />
-      </div>
-
-      <div class="section-heading">
-        <h2>智能建议</h2>
-        <button type="button" @click="emit('navigate', 'cleanup')">
-          全部建议 <ChevronRight :size="15" aria-hidden="true" />
-        </button>
-      </div>
-      <div class="recommendations-grid">
-        <div class="suggestions-panel">
-          <SuggestionItem
-            v-for="suggestion in dashboardSuggestions"
-            :key="suggestion.id"
-            :suggestion="suggestion"
-          />
-        </div>
-        <aside class="monthly-card">
-          <div class="monthly-label">
-            <span>本月累计释放</span
-            ><TrendingUp :size="18" aria-hidden="true" />
-          </div>
-          <strong>{{ formatBytes(monthlyReleasedBytes) }}</strong>
-          <p>来自本月已完成的本地审计记录</p>
-        </aside>
       </div>
     </template>
 

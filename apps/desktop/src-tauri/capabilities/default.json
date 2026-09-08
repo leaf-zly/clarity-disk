@@ -3,5 +3,5 @@
   "identifier": "main-capability",
   "description": "Minimum capability set for the main dashboard window",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "core:window:allow-set-theme"]
 }

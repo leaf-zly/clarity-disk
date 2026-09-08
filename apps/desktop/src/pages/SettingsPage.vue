@@ -47,6 +47,7 @@ const busy = ref(false);
 const updateBusy = ref(false);
 const message = ref("");
 const errorMessage = ref("");
+const diagnosticsWarning = ref("");
 const persistedTheme = shallowRef<AppSettings["theme"]>("system");
 const persistedLanguage =
   shallowRef<AppSettings["language"]>("simplifiedChinese");
@@ -58,20 +59,30 @@ const performancePassed = computed(
     ).length ?? 0,
 );
 
+/** Refreshes optional diagnostics without changing the outcome of a settings write. */
+async function refreshDiagnostics(): Promise<void> {
+  diagnosticsWarning.value = "";
+  try {
+    diagnostics.value = await getDiagnosticsSnapshot();
+  } catch {
+    diagnostics.value = null;
+    diagnosticsWarning.value =
+      "诊断信息暂时无法读取，不影响设置使用或已保存的更改。";
+  }
+}
+
+/** Loads editable preferences independently from optional diagnostic data. */
 async function load(): Promise<void> {
   busy.value = true;
   errorMessage.value = "";
   try {
-    const [nextSettings, nextDiagnostics] = await Promise.all([
-      getAppSettings(),
-      getDiagnosticsSnapshot(),
-    ]);
+    const nextSettings = await getAppSettings();
     persistedTheme.value = nextSettings.theme;
     persistedLanguage.value = nextSettings.language;
     applyLanguagePreference(nextSettings.language);
     settings.value = nextSettings;
-    diagnostics.value = nextDiagnostics;
     ignoredRootsText.value = nextSettings.ignoredScanRoots.join("\n");
+    await refreshDiagnostics();
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : String(error);
   } finally {
@@ -79,8 +90,9 @@ async function load(): Promise<void> {
   }
 }
 
+/** Persists validated preferences; ancillary read errors never imply rollback. */
 async function save(): Promise<void> {
-  if (!settings.value) return;
+  if (!settings.value || busy.value) return;
   busy.value = true;
   message.value = "";
   errorMessage.value = "";
@@ -98,8 +110,8 @@ async function save(): Promise<void> {
     persistedLanguage.value = settings.value.language;
     applyLanguagePreference(settings.value.language);
     applyThemePreference(settings.value.theme);
-    diagnostics.value = await getDiagnosticsSnapshot();
     message.value = "设置已验证并保存。";
+    await refreshDiagnostics();
   } catch (error) {
     errorMessage.value = settingsSaveError(error);
   } finally {
@@ -108,6 +120,7 @@ async function save(): Promise<void> {
 }
 
 async function runMaintenance(): Promise<void> {
+  if (busy.value) return;
   busy.value = true;
   message.value = "";
   errorMessage.value = "";
@@ -122,6 +135,7 @@ async function runMaintenance(): Promise<void> {
 }
 
 async function checkUpdate(): Promise<void> {
+  if (updateBusy.value) return;
   updateBusy.value = true;
   errorMessage.value = "";
   try {
@@ -133,14 +147,16 @@ async function checkUpdate(): Promise<void> {
   }
 }
 
+/** Clears local markers and reports subsequent read failures separately. */
 async function clearDiagnostics(): Promise<void> {
+  if (busy.value) return;
   busy.value = true;
   message.value = "";
   errorMessage.value = "";
   try {
     await clearCrashDiagnostics();
-    diagnostics.value = await getDiagnosticsSnapshot();
     message.value = "本地崩溃标记已清除。";
+    await refreshDiagnostics();
   } catch {
     errorMessage.value = "本地崩溃标记清除失败，请稍后重试。";
   } finally {
@@ -221,9 +237,12 @@ onMounted(() => void load());
     <p v-if="errorMessage" class="message error" role="alert">
       {{ errorMessage }}
     </p>
+    <p v-if="diagnosticsWarning" class="message" role="status">
+      {{ diagnosticsWarning }}
+    </p>
 
     <template v-if="settings">
-      <div class="settings-grid">
+      <fieldset class="settings-grid" :disabled="busy" aria-label="应用偏好">
         <article class="card">
           <div class="card-title">
             <ShieldCheck :size="20" />
@@ -363,7 +382,7 @@ onMounted(() => void load());
             placeholder="D:\Projects\archive"
           ></textarea>
         </article>
-      </div>
+      </fieldset>
 
       <div class="release-grid">
         <article class="card">
@@ -443,6 +462,13 @@ onMounted(() => void load());
 </template>
 
 <style scoped>
+fieldset.settings-grid {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+
 .settings-page {
   max-width: 1180px;
   margin: 0 auto;

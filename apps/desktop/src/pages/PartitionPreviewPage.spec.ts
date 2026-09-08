@@ -46,7 +46,7 @@ describe("PartitionPreviewPage", () => {
     expect(wrapper.text()).toContain("当前条件具备合并可能");
     expect(wrapper.text()).toContain("执行授权");
     expect(wrapper.text()).toContain("未授权");
-    expect(wrapper.text()).toContain("模拟后布局");
+    expect(wrapper.text()).toContain("预演后布局");
     expect(wrapper.findAll(".region.expanded")).toHaveLength(1);
   });
 

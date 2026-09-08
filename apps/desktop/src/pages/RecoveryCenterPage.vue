@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, shallowRef } from "vue";
+import {
+  computed,
+  onActivated,
+  onDeactivated,
+  onMounted,
+  ref,
+  shallowRef,
+} from "vue";
 import { ArchiveRestore, RefreshCw, ShieldAlert, Trash2 } from "@lucide/vue";
 
 import {
@@ -11,7 +18,10 @@ import {
   prepareQuarantineDeletion,
   restoreQuarantineEntryTo,
 } from "@/services/operations-service";
-import type { QuarantineExecutionIndex } from "@/types/cleanup-execution";
+import type {
+  QuarantineEntryStatus,
+  QuarantineExecutionIndex,
+} from "@/types/cleanup-execution";
 import type {
   QuarantineDeletionChallenge,
   QuarantineRestoreDestination,
@@ -25,10 +35,35 @@ const challenge = shallowRef<QuarantineDeletionChallenge | null>(null);
 const confirmation = ref("");
 const busy = ref(false);
 const isRefreshing = ref(false);
+const stateReadable = ref(false);
+const actionsLocked = computed(
+  () => busy.value || isRefreshing.value || !stateReadable.value,
+);
+let confirmationRevision = 0;
 const errorMessage = ref("");
 const notice = ref("");
 const retentionDays = ref<7 | 15 | 30>(30);
 const capacityGiB = ref<1 | 5 | 10 | 20>(10);
+
+/** User-facing lifecycle labels; internal enum values never leak into the list. */
+const statusLabels: Record<QuarantineEntryStatus, string> = {
+  previewOnly: "仅预览",
+  staging: "正在隔离",
+  copying: "正在复制",
+  copyVerified: "副本已校验",
+  staged: "可恢复",
+  restoring: "正在恢复",
+  restored: "已恢复",
+  restoreConflict: "原位置存在同名文件",
+  expired: "已到期，仍可恢复",
+};
+
+/** Invalidates any pending or displayed authorization when its context changes. */
+function invalidateConfirmation(): void {
+  confirmationRevision += 1;
+  challenge.value = null;
+  confirmation.value = "";
+}
 
 const recoverableEntries = computed(
   () =>
@@ -46,9 +81,12 @@ const recoverableEntries = computed(
 async function refresh(): Promise<void> {
   if (isRefreshing.value) return;
   isRefreshing.value = true;
+  stateReadable.value = false;
+  invalidateConfirmation();
   errorMessage.value = "";
   try {
     index.value = await getExecutionQuarantineIndex();
+    stateReadable.value = true;
     selectedIds.value = selectedIds.value.filter((entryId) =>
       recoverableEntries.value.some((entry) => entry.entryId === entryId),
     );
@@ -65,41 +103,64 @@ async function refresh(): Promise<void> {
 }
 
 function toggle(entryId: string): void {
+  if (actionsLocked.value) return;
   selectedIds.value = selectedIds.value.includes(entryId)
     ? selectedIds.value.filter((id) => id !== entryId)
     : [...selectedIds.value, entryId];
-  challenge.value = null;
-  confirmation.value = "";
+  invalidateConfirmation();
 }
 
+/** Restores a stable selection sequentially, retaining failed entries for retry. */
 async function restoreSelected(): Promise<void> {
-  if (!selectedIds.value.length) return;
+  if (actionsLocked.value || !selectedIds.value.length) return;
+  const entryIds = [...selectedIds.value];
+  const restoreDestination = destination.value;
+  invalidateConfirmation();
   busy.value = true;
   errorMessage.value = "";
   notice.value = "";
   try {
-    const results = await Promise.all(
-      selectedIds.value.map((entryId) =>
-        restoreQuarantineEntryTo(entryId, destination.value),
-      ),
-    );
-    notice.value = results.map((result) => result.reason).join("；");
-    selectedIds.value = [];
+    const failedIds: string[] = [];
+    // Avoid competing filesystem/index writes and wait for every accepted request.
+    for (const entryId of entryIds) {
+      try {
+        const result = await restoreQuarantineEntryTo(
+          entryId,
+          restoreDestination,
+        );
+        if (result.status !== "restored") failedIds.push(entryId);
+      } catch {
+        failedIds.push(entryId);
+      }
+    }
+    selectedIds.value = failedIds;
     await refresh();
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : String(error);
+    notice.value = `已恢复 ${entryIds.length - failedIds.length} 项，未恢复 ${failedIds.length} 项。`;
+    if (failedIds.length) {
+      errorMessage.value = [
+        errorMessage.value,
+        "部分项目未恢复；请检查文件占用或同名冲突，可选择其他恢复位置重试。",
+      ]
+        .filter(Boolean)
+        .join(" ");
+    }
   } finally {
     busy.value = false;
   }
 }
 
+/** Requests a one-time challenge that must still belong to the active selection. */
 async function prepareDeletion(): Promise<void> {
-  if (!selectedIds.value.length) return;
+  if (actionsLocked.value || !selectedIds.value.length) return;
+  invalidateConfirmation();
+  const revision = confirmationRevision;
   busy.value = true;
   errorMessage.value = "";
   notice.value = "";
   try {
-    challenge.value = await prepareQuarantineDeletion(selectedIds.value);
+    const prepared = await prepareQuarantineDeletion([...selectedIds.value]);
+    if (revision !== confirmationRevision) return;
+    challenge.value = prepared;
     confirmation.value = "";
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : String(error);
@@ -109,7 +170,12 @@ async function prepareDeletion(): Promise<void> {
 }
 
 async function deletePermanently(): Promise<void> {
-  if (!challenge.value) return;
+  if (
+    actionsLocked.value ||
+    !challenge.value ||
+    confirmation.value !== challenge.value.confirmationPhrase
+  )
+    return;
   busy.value = true;
   errorMessage.value = "";
   try {
@@ -132,8 +198,11 @@ async function deletePermanently(): Promise<void> {
 }
 
 async function savePolicy(): Promise<void> {
+  if (actionsLocked.value) return;
+  invalidateConfirmation();
   busy.value = true;
   errorMessage.value = "";
+  notice.value = "";
   try {
     index.value = await updateQuarantinePolicy({
       retentionDays: retentionDays.value,
@@ -148,6 +217,11 @@ async function savePolicy(): Promise<void> {
 }
 
 onMounted(() => void refresh());
+// Mounted and initial activation run together; refresh's in-flight guard deduplicates them.
+onActivated(() => {
+  if (!busy.value) void refresh();
+});
+onDeactivated(invalidateConfirmation);
 </script>
 
 <template>
@@ -157,7 +231,7 @@ onMounted(() => void refresh());
         <p class="eyebrow">恢复与隔离</p>
         <h1 id="recovery-title">恢复中心</h1>
         <p class="subtitle">
-          所有操作只使用后端条目标识；恢复不覆盖，永久删除需再次确认。
+          找回已隔离的文件。恢复不会覆盖同名文件，永久删除前需要再次确认。
         </p>
       </div>
       <button
@@ -197,7 +271,7 @@ onMounted(() => void refresh());
       <div class="panel-heading">
         <div>
           <h2>隔离项目</h2>
-          <p>路径仅用于展示，不会从界面回传给执行器。</p>
+          <p>选择文件恢复到原位置，或保存到其他恢复文件夹。</p>
         </div>
         <span>{{ selectedIds.length }} 项已选择</span>
       </div>
@@ -219,6 +293,7 @@ onMounted(() => void refresh());
           <label>
             <input
               type="checkbox"
+              :disabled="actionsLocked"
               :checked="selectedIds.includes(entry.entryId)"
               @change="toggle(entry.entryId)"
             />
@@ -227,7 +302,7 @@ onMounted(() => void refresh());
               <small>{{ entry.originalPath }}</small>
             </span>
             <span class="entry-meta">
-              {{ formatBytes(entry.bytes) }} · {{ entry.status }}
+              {{ formatBytes(entry.bytes) }} · {{ statusLabels[entry.status] }}
             </span>
           </label>
         </li>
@@ -236,7 +311,7 @@ onMounted(() => void refresh());
       <div class="action-row">
         <label class="field-inline">
           恢复位置
-          <select v-model="destination">
+          <select v-model="destination" :disabled="actionsLocked">
             <option value="original">原位置</option>
             <option value="desktop">桌面 / Clarity Disk Restored</option>
             <option value="documents">文档 / Clarity Disk Restored</option>
@@ -246,7 +321,7 @@ onMounted(() => void refresh());
         <button
           class="primary"
           type="button"
-          :disabled="busy || !selectedIds.length"
+          :disabled="actionsLocked || !selectedIds.length"
           @click="restoreSelected"
         >
           恢复所选
@@ -254,7 +329,7 @@ onMounted(() => void refresh());
         <button
           class="danger-outline"
           type="button"
-          :disabled="busy || !selectedIds.length"
+          :disabled="actionsLocked || !selectedIds.length"
           @click="prepareDeletion"
         >
           <Trash2 :size="16" aria-hidden="true" />永久删除…
@@ -267,18 +342,24 @@ onMounted(() => void refresh());
       <div>
         <h2>此操作无法恢复</h2>
         <p>
-          已绑定
-          {{ challenge.entryIds.length }} 个当前隔离项目，令牌将在两分钟后失效。
+          将永久删除
+          {{ challenge.entryIds.length }} 个隔离项目。本次确认两分钟内有效。
         </p>
         <label>
           输入“{{ challenge.confirmationPhrase }}”
-          <input v-model="confirmation" autocomplete="off" />
+          <input
+            v-model="confirmation"
+            :disabled="actionsLocked"
+            autocomplete="off"
+          />
         </label>
       </div>
       <button
         class="danger"
         type="button"
-        :disabled="busy || confirmation !== challenge.confirmationPhrase"
+        :disabled="
+          actionsLocked || confirmation !== challenge.confirmationPhrase
+        "
         @click="deletePermanently"
       >
         确认永久删除
@@ -288,11 +369,11 @@ onMounted(() => void refresh());
     <article class="panel policy-panel">
       <div>
         <h2>隔离策略</h2>
-        <p>保留期和容量仅接受经过评审的固定档位；策略不会自动擦除文件。</p>
+        <p>到期后提醒处理，不会自动删除。隔离文件仍占用磁盘空间。</p>
       </div>
       <label
         >保留期
-        <select v-model="retentionDays">
+        <select v-model="retentionDays" :disabled="actionsLocked">
           <option :value="7">7 天</option>
           <option :value="15">15 天</option>
           <option :value="30">30 天</option>
@@ -300,7 +381,7 @@ onMounted(() => void refresh());
       </label>
       <label
         >容量上限
-        <select v-model="capacityGiB">
+        <select v-model="capacityGiB" :disabled="actionsLocked">
           <option :value="1">1 GB</option>
           <option :value="5">5 GB</option>
           <option :value="10">10 GB</option>
@@ -310,7 +391,7 @@ onMounted(() => void refresh());
       <button
         class="secondary"
         type="button"
-        :disabled="busy"
+        :disabled="actionsLocked"
         @click="savePolicy"
       >
         保存策略

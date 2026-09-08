@@ -3,6 +3,7 @@
 use clarity_core::{CleanupSummary, DashboardSnapshot, DiskHealth};
 use std::sync::OnceLock;
 use std::time::Instant;
+use tauri::Manager;
 
 mod audit_store;
 mod automatic_maintenance;

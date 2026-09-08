@@ -90,13 +90,15 @@ onBeforeUnmount(() => {
 .app-shell {
   min-height: 100vh;
   display: grid;
-  grid-template-columns: 224px minmax(0, 1fr);
+  grid-template-columns: 236px minmax(0, 1fr);
   background: var(--color-canvas);
 }
 
 .app-content {
   min-width: 0;
-  padding: 34px 38px 44px;
+  width: min(100%, 1440px);
+  margin: 0 auto;
+  padding: 36px clamp(28px, 4vw, 64px) 56px;
 }
 
 .preview-banner {
@@ -112,7 +114,7 @@ onBeforeUnmount(() => {
 
 @media (max-width: 900px) {
   .app-shell {
-    grid-template-columns: 76px minmax(0, 1fr);
+    grid-template-columns: 78px minmax(0, 1fr);
   }
 
   .app-content {

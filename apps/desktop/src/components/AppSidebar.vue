@@ -118,7 +118,7 @@ const secondaryItems = [
   height: 100vh;
   display: flex;
   flex-direction: column;
-  padding: 22px 14px 16px;
+  padding: 26px 14px 18px;
   background: var(--color-sidebar);
   border-right: 1px solid var(--color-border);
   backdrop-filter: blur(24px) saturate(145%);
@@ -130,7 +130,7 @@ const secondaryItems = [
   gap: 10px;
   min-height: 42px;
   padding: 0 10px;
-  margin-bottom: 18px;
+  margin-bottom: 24px;
 }
 
 .brand-mark {
@@ -163,20 +163,20 @@ const secondaryItems = [
 }
 
 .group-label {
-  padding: 14px 10px 6px;
+  padding: 18px 10px 7px;
   color: var(--color-text-secondary);
   font-size: 0.75rem;
 }
 
 .nav-item {
   width: 100%;
-  min-height: 40px;
+  min-height: 42px;
   display: flex;
   align-items: center;
   gap: 11px;
   padding: 8px 11px;
   border: 0;
-  border-radius: 10px;
+  border-radius: 12px;
   color: var(--color-text);
   background: transparent;
   text-align: left;
@@ -193,8 +193,8 @@ const secondaryItems = [
 }
 
 .nav-item.active {
-  background: var(--color-surface);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  background: color-mix(in srgb, var(--color-blue) 11%, var(--color-surface));
+  box-shadow: inset 3px 0 0 var(--color-blue);
   font-weight: 600;
 }
 

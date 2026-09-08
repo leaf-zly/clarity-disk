@@ -563,6 +563,24 @@ pub fn run() {
     diagnostics::set_crash_retention(settings.retain_crash_diagnostics);
     diagnostics::install_panic_hook();
     tauri::Builder::default()
+        .setup(|app| {
+            // Windows can restore a stale minimized or undersized geometry from
+            // a previous session. Recover only invalid bounds and preserve a
+            // user's normal window size otherwise.
+            if let Some(window) = app.get_webview_window("main") {
+                if let Ok(size) = window.outer_size()
+                    && (size.width < 920 || size.height < 640)
+                {
+                    let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
+                        width: 1240.0,
+                        height: 820.0,
+                    }));
+                    let _ = window.center();
+                }
+                let _ = window.set_focus();
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             get_dashboard_snapshot,
             scan_cleanup_preview,

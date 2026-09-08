@@ -383,7 +383,7 @@ onMounted(refreshTopology);
             <ArrowRight :size="16" aria-hidden="true" />
             <span>{{ partitionName(sourcePartition) }}</span>
           </div>
-          <p>模拟方向：迁移右侧源分区数据，再将其容量并入左侧目标分区。</p>
+          <p>预演方向：迁移右侧源分区数据，再将其容量并入左侧目标分区。</p>
 
           <button
             class="primary-button"
@@ -505,7 +505,7 @@ onMounted(refreshTopology);
         </div>
 
         <div v-if="preview.simulatedLayout" class="simulation">
-          <span class="section-kicker">模拟后布局</span>
+          <span class="section-kicker">预演后布局</span>
           <PartitionTopologyBar
             :partitions="preview.simulatedLayout.partitions"
             :disk-size-bytes="preview.simulatedLayout.diskSizeBytes"

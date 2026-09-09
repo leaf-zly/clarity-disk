@@ -1,0 +1,60 @@
+name: Repair preview update metadata
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Existing published preview version; installer bytes are never replaced
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: preview-update-metadata
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      APP_VERSION: ${{ inputs.version }}
+      VITE_UPDATE_CHANNEL: preview
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: Verify manifest rules
+        run: node --test scripts/release/create-update-manifest.test.mjs
+      - name: Regenerate metadata from existing public assets
+        shell: pwsh
+        run: |
+          if ($env:APP_VERSION -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') { throw 'Invalid semantic version.' }
+          $tag = "preview-v$env:APP_VERSION"
+          $release = gh release view $tag --repo $env:GITHUB_REPOSITORY --json isDraft,isPrerelease,body | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($release.isDraft -or -not $release.isPrerelease) { throw 'Only published previews can be repaired.' }
+          $stage = Join-Path $env:RUNNER_TEMP 'preview-metadata'
+          gh release download $tag --repo $env:GITHUB_REPOSITORY --dir $stage
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $installers = @(Get-ChildItem -LiteralPath $stage -Filter *.exe)
+          if ($installers.Count -ne 1) { throw 'Expected one published installer.' }
+          $installer = $installers[0]
+          $expected = ((Get-Content -LiteralPath "$stage/SHA256SUMS.txt" -Raw).Trim() -split '\s+', 2)[0]
+          $actual = (Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ine $expected) { throw 'Existing installer checksum does not match; refusing to repair metadata.' }
+          Set-Content -LiteralPath "$stage/notes.md" -Value $release.body -Encoding utf8
+          node scripts/release/create-update-manifest.mjs $installer.FullName "$($installer.FullName).sig" "$stage/notes.md" "$stage/latest.json"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "$actual  $($installer.Name)" | Set-Content -LiteralPath "$stage/SHA256SUMS.txt" -Encoding utf8
+          # Do not roll the moving feed back if a newer version was published.
+          $current = Invoke-RestMethod "https://github.com/leaf-zly/clarity-disk/releases/download/update-preview/latest.json"
+          if ([version]$current.version -gt [version]$env:APP_VERSION) { throw 'A newer update is already live.' }
+          gh release upload $tag "$stage/latest.json" "$stage/SHA256SUMS.txt" --repo $env:GITHUB_REPOSITORY --clobber
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          gh release upload update-preview "$stage/latest.json" --repo $env:GITHUB_REPOSITORY --clobber
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

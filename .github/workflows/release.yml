@@ -150,7 +150,7 @@ jobs:
           $checksumFile = "target\release\SHA256SUMS.txt"
           $checksums = foreach ($file in $releaseFiles) {
             $hash = Get-FileHash -LiteralPath $file -Algorithm SHA256
-            "$($hash.Hash.ToLowerInvariant())  $([IO.Path]::GetFileName($file))"
+            "$($hash.Hash.ToLowerInvariant())  $([IO.Path]::GetFileName($file).Replace(' ', '.'))"
           }
           Set-Content -LiteralPath $checksumFile -Value $checksums -Encoding utf8
 

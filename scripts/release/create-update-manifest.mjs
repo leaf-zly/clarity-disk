@@ -33,7 +33,9 @@ export function createUpdateManifest(input) {
     platforms: {
       "windows-x86_64": {
         signature,
-        url: `https://github.com/leaf-zly/clarity-disk/releases/download/${tag}/${encodeURIComponent(input.installerName)}`,
+        // GitHub normalizes spaces in uploaded asset names to dots, even when
+        // the local filename supplied to `gh release upload` contains spaces.
+        url: `https://github.com/leaf-zly/clarity-disk/releases/download/${tag}/${encodeURIComponent(input.installerName.replaceAll(" ", "."))}`,
       },
     },
   };

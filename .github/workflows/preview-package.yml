@@ -100,11 +100,12 @@ jobs:
           if ($installers.Count -ne 1) {
             throw "Expected exactly one NSIS installer, found $($installers.Count)."
           }
-          Copy-Item -LiteralPath $installers[0].FullName -Destination $artifactRoot
-          Copy-Item -LiteralPath "$($installers[0].FullName).sig" -Destination $artifactRoot
-          node scripts/release/create-update-manifest.mjs $installers[0].FullName "$($installers[0].FullName).sig" $env:UPDATE_NOTES_PATH "$artifactRoot\latest.json"
+          $installedName = $installers[0].Name.Replace(' ', '.')
+          $stagedInstaller = Join-Path $artifactRoot $installedName
+          Copy-Item -LiteralPath $installers[0].FullName -Destination $stagedInstaller
+          Copy-Item -LiteralPath "$($installers[0].FullName).sig" -Destination "$stagedInstaller.sig"
+          node scripts/release/create-update-manifest.mjs $stagedInstaller "$stagedInstaller.sig" $env:UPDATE_NOTES_PATH "$artifactRoot\latest.json"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $installedName = $installers[0].Name
           $hash = Get-FileHash -LiteralPath $installers[0].FullName -Algorithm SHA256
           "$($hash.Hash.ToLowerInvariant())  $installedName" | Set-Content -LiteralPath "$artifactRoot\SHA256SUMS.txt" -Encoding utf8
           @(

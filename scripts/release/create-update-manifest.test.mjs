@@ -17,7 +17,7 @@ test("preview manifest uses immutable official version assets, not mutable feed 
   assert.equal(manifest.version, "0.1.1");
   assert.equal(
     manifest.platforms["windows-x86_64"].url,
-    "https://github.com/leaf-zly/clarity-disk/releases/download/preview-v0.1.1/Clarity%20Disk_0.1.1_x64-setup.exe",
+    "https://github.com/leaf-zly/clarity-disk/releases/download/preview-v0.1.1/Clarity.Disk_0.1.1_x64-setup.exe",
   );
 });
 test("stable manifests never reference preview installers", () => {

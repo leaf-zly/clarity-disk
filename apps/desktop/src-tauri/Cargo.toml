@@ -20,15 +20,15 @@ getrandom.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
-sysinfo = { version = "0.37.2", default-features = false, features = ["disk"] }
+sysinfo = { version = "0.39.6", default-features = false, features = ["disk"] }
 tauri.workspace = true
-tauri-plugin-updater = "=2.10.1"
+tauri-plugin-updater = "=2.11.0"
 thiserror.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 # `wmi` accepts multiple incompatible windows-core generations. Pin the COM
 # ABI to the generation used by `windows` 0.61 so its interfaces stay coherent.
-windows-core = "=0.61.2"
+windows-core = "=0.62.2"
 wmi = { version = "0.18.4", default-features = false }
 windows-sys = { version = "0.61.2", features = [
   "Win32_Foundation",

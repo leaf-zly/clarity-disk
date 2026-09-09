@@ -6,6 +6,21 @@ The format follows Keep a Changelog, and the project uses Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-09-09
+
+### Added
+
+- Opt-in preview online updates with pinned Minisign verification, download progress, explicit installation confirmation, and Windows restart.
+- Native update installation gate that refuses shutdown during tracked file operations and administrator maintenance.
+- GitHub-hosted signed-updater preview publication with immutable version assets and a separate mutable update manifest.
+
+### Fixed
+
+- Stable release metadata ignores legacy preview tags and update-feed releases.
+- Native titlebar theme permissions, recovery refresh/partial restore handling, and misleading settings-save errors (carried forward from the previous preview).
+
+## [0.1.0] - 2026-08-24
+
 ### Added
 
 - Initial Rust, Tauri, Vue, CI/CD, documentation, and dashboard foundation.

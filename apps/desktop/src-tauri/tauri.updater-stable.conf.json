@@ -1,0 +1,10 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/leaf-zly/clarity-disk/releases/latest/download/latest.json"
+      ]
+    }
+  }
+}

@@ -11,7 +11,6 @@ import {
   Activity,
   Bell,
   CheckCircle2,
-  CloudDownload,
   LockKeyhole,
   Play,
   Save,
@@ -26,14 +25,13 @@ import {
   runAutomaticMaintenance,
   updateAppSettings,
 } from "@/services/operations-service";
-import { checkForUpdates } from "@/services/release-service";
+import OnlineUpdateCard from "@/components/OnlineUpdateCard.vue";
 import { applyLanguagePreference, translate } from "@/services/locale-service";
 import { applyThemePreference } from "@/services/theme-service";
 import type {
   AppSettings,
   AutomaticMaintenanceRunReport,
   DiagnosticsSnapshot,
-  UpdateRelease,
 } from "@/types/operations";
 
 const settings = ref<AppSettings | null>(null);
@@ -41,10 +39,9 @@ const diagnostics = shallowRef<DiagnosticsSnapshot | null>(null);
 const maintenanceReport = shallowRef<AutomaticMaintenanceRunReport | null>(
   null,
 );
-const release = shallowRef<UpdateRelease | null>(null);
 const ignoredRootsText = ref("");
 const busy = ref(false);
-const updateBusy = ref(false);
+const persistedUpdateChecks = ref(false);
 const message = ref("");
 const errorMessage = ref("");
 const diagnosticsWarning = ref("");
@@ -79,6 +76,7 @@ async function load(): Promise<void> {
     const nextSettings = await getAppSettings();
     persistedTheme.value = nextSettings.theme;
     persistedLanguage.value = nextSettings.language;
+    persistedUpdateChecks.value = nextSettings.updateChecksEnabled;
     applyLanguagePreference(nextSettings.language);
     settings.value = nextSettings;
     ignoredRootsText.value = nextSettings.ignoredScanRoots.join("\n");
@@ -108,6 +106,7 @@ async function save(): Promise<void> {
     ignoredRootsText.value = settings.value.ignoredScanRoots.join("\n");
     persistedTheme.value = settings.value.theme;
     persistedLanguage.value = settings.value.language;
+    persistedUpdateChecks.value = settings.value.updateChecksEnabled;
     applyLanguagePreference(settings.value.language);
     applyThemePreference(settings.value.theme);
     message.value = "设置已验证并保存。";
@@ -131,19 +130,6 @@ async function runMaintenance(): Promise<void> {
     errorMessage.value = error instanceof Error ? error.message : String(error);
   } finally {
     busy.value = false;
-  }
-}
-
-async function checkUpdate(): Promise<void> {
-  if (updateBusy.value) return;
-  updateBusy.value = true;
-  errorMessage.value = "";
-  try {
-    release.value = await checkForUpdates();
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : String(error);
-  } finally {
-    updateBusy.value = false;
   }
 }
 
@@ -306,7 +292,7 @@ onMounted(() => void load());
             ><input
               v-model="settings.updateChecksEnabled"
               type="checkbox"
-            /><span>允许检查官方 GitHub Release 元数据</span></label
+            /><span>允许检查和下载官方在线更新</span></label
           >
           <button
             class="secondary"
@@ -385,51 +371,11 @@ onMounted(() => void load());
       </fieldset>
 
       <div class="release-grid">
-        <article class="card">
-          <div class="card-title">
-            <CloudDownload :size="20" />
-            <div>
-              <h2>更新与发布</h2>
-              <p>
-                仅查询官方仓库；安装包必须同时具备 Authenticode 与 SHA-256。
-              </p>
-            </div>
-          </div>
-          <button
-            class="secondary"
-            type="button"
-            :disabled="updateBusy || !settings.updateChecksEnabled"
-            @click="checkUpdate"
-          >
-            {{ updateBusy ? "检查中…" : "检查更新" }}
-          </button>
-          <div v-if="release" class="release-result">
-            <strong>{{
-              !release.publishedAt
-                ? "尚未发布正式版本"
-                : release.updateAvailable
-                  ? `发现 ${release.latestVersion}`
-                  : `已是最新 ${release.currentVersion}`
-            }}</strong>
-            <p v-if="!release.publishedAt">
-              当前为功能测试构建；正式发布后才会提供签名安装包和校验文件。
-            </p>
-            <span
-              v-if="release.publishedAt"
-              :class="{ passed: release.hasChecksums }"
-              >SHA-256 {{ release.hasChecksums ? "可用" : "缺失" }}</span
-            >
-            <span
-              v-if="release.publishedAt"
-              :class="{ passed: release.hasWindowsInstaller }"
-              >Windows 安装包
-              {{ release.hasWindowsInstaller ? "可用" : "缺失" }}</span
-            >
-            <a :href="release.releaseUrl" target="_blank" rel="noreferrer"
-              >在 GitHub 查看发布页面</a
-            >
-          </div>
-        </article>
+        <OnlineUpdateCard
+          :enabled="
+            persistedUpdateChecks && settings.updateChecksEnabled && !busy
+          "
+        />
 
         <article class="card">
           <div class="card-title">

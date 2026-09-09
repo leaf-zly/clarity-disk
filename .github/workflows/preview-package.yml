@@ -2,9 +2,15 @@ name: Windows unsigned preview package
 
 on:
   workflow_dispatch:
+    inputs:
+      publish_update:
+        description: Publish a signed-updater preview to the opt-in preview feed
+        type: boolean
+        default: false
 
 permissions:
-  contents: read
+  contents: write
+  actions: read
 
 concurrency:
   group: windows-unsigned-preview-${{ github.ref }}
@@ -18,6 +24,7 @@ jobs:
     env:
       CARGO_INCREMENTAL: 0
       CARGO_TERM_COLOR: always
+      VITE_UPDATE_CHANNEL: preview
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -50,6 +57,14 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --prefer-offline
 
+      - name: Verify frontend and updater manifest rules
+        run: |
+          pnpm typecheck
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pnpm test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --test scripts/release/create-update-manifest.test.mjs
+
       - name: Read application version
         shell: pwsh
         run: |
@@ -58,6 +73,9 @@ jobs:
             throw "Application version is not semantic: $($config.version)"
           }
           "APP_VERSION=$($config.version)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          $notes = "docs/release/$($config.version)-preview.md"
+          if (-not (Test-Path -LiteralPath $notes)) { throw "Missing version-specific release notes: $notes" }
+          "UPDATE_NOTES_PATH=$notes" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Build privileged broker
         shell: pwsh
@@ -68,7 +86,10 @@ jobs:
           Copy-Item -LiteralPath 'target\release\clarity-privileged-service.exe' -Destination "$binaryRoot\clarity-privileged-service-x86_64-pc-windows-msvc.exe"
 
       - name: Build unsigned NSIS installer
-        run: pnpm --filter @clarity-disk/desktop tauri build --bundles nsis --config src-tauri/tauri.release.conf.json
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: pnpm --filter @clarity-disk/desktop tauri build --bundles nsis --config src-tauri/tauri.release.conf.json --config src-tauri/tauri.updater-build.conf.json
 
       - name: Stage preview artifact
         shell: pwsh
@@ -80,6 +101,9 @@ jobs:
             throw "Expected exactly one NSIS installer, found $($installers.Count)."
           }
           Copy-Item -LiteralPath $installers[0].FullName -Destination $artifactRoot
+          Copy-Item -LiteralPath "$($installers[0].FullName).sig" -Destination $artifactRoot
+          node scripts/release/create-update-manifest.mjs $installers[0].FullName "$($installers[0].FullName).sig" $env:UPDATE_NOTES_PATH "$artifactRoot\latest.json"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $installedName = $installers[0].Name
           $hash = Get-FileHash -LiteralPath $installers[0].FullName -Algorithm SHA256
           "$($hash.Hash.ToLowerInvariant())  $installedName" | Set-Content -LiteralPath "$artifactRoot\SHA256SUMS.txt" -Encoding utf8
@@ -108,3 +132,41 @@ jobs:
           This artifact is for short-lived functional testing only. It is not a formal release,
           has no Authenticode publisher, and may trigger SmartScreen or antivirus warnings.
           '@ | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+
+      # Publish the feed last. Existing clients must never see a manifest before
+      # its immutable installer and signature are available on the version release.
+      - name: Publish opt-in preview update
+        if: inputs.publish_update
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          $deadline = (Get-Date).AddMinutes(10)
+          do {
+            $runs = gh run list --repo $env:GITHUB_REPOSITORY --workflow ci.yml --commit $env:GITHUB_SHA --limit 1 --json status,conclusion | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $quality = @($runs) | Select-Object -First 1
+            if ($quality -and $quality.status -eq 'completed') {
+              if ($quality.conclusion -ne 'success') { throw 'CI failed for this exact source commit; refusing to publish an update.' }
+              break
+            }
+            if ((Get-Date) -ge $deadline) { throw 'CI has not passed for this source commit; refusing to publish an update.' }
+            Start-Sleep -Seconds 15
+          } while ($true)
+          $tag = "preview-v$env:APP_VERSION"
+          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -eq 0) { throw 'Version already published. Bump the application version; do not replace immutable installer assets.' }
+          gh release create $tag --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --draft --prerelease --title "Clarity Disk $env:APP_VERSION Preview" --notes-file $env:UPDATE_NOTES_PATH
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $files = @(Get-ChildItem -LiteralPath target/preview-artifact -File | ForEach-Object FullName)
+          gh release upload $tag @files --repo $env:GITHUB_REPOSITORY
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          gh release edit $tag --repo $env:GITHUB_REPOSITORY --draft=false --prerelease --latest=false
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          gh release view update-preview --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create update-preview --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --prerelease --latest=false --title 'Clarity Disk preview update feed' --notes 'Mutable manifest only. Preview installers are signed with the pinned updater key, not with a Windows publisher certificate.'
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          gh release upload update-preview target/preview-artifact/latest.json --repo $env:GITHUB_REPOSITORY --clobber
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

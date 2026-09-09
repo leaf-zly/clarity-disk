@@ -1,6 +1,6 @@
 {
   "name": "@clarity-disk/desktop",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@tauri-apps/api": "catalog:",
+    "@tauri-apps/plugin-updater": "catalog:",
     "@lucide/vue": "catalog:",
     "vue": "catalog:"
   },

@@ -3,5 +3,11 @@
   "identifier": "main-capability",
   "description": "Minimum capability set for the main dashboard window",
   "windows": ["main"],
-  "permissions": ["core:default", "core:window:allow-set-theme"]
+  "permissions": [
+    "core:default",
+    "core:window:allow-set-theme",
+    "updater:allow-check",
+    "updater:allow-download",
+    "updater:allow-install"
+  ]
 }

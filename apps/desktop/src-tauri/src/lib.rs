@@ -31,12 +31,14 @@ mod settings_store;
 mod space_scan;
 mod startup_behavior;
 mod state_store;
+mod update_install_gate;
 mod windows_process;
 
 static SPACE_SCANS: OnceLock<space_scan::SpaceScanManager> = OnceLock::new();
 static CLEANUP_WORKFLOW: OnceLock<cleanup_workflow::CleanupWorkflow> = OnceLock::new();
 static PRIVILEGED_WORKFLOW: OnceLock<privileged_workflow::PrivilegedWorkflow> = OnceLock::new();
 static SETTINGS: OnceLock<settings_store::SettingsStore> = OnceLock::new();
+static UPDATE_INSTALL_GATE: OnceLock<update_install_gate::UpdateInstallGate> = OnceLock::new();
 static AUTOMATIC_MAINTENANCE: OnceLock<automatic_maintenance::AutomaticMaintenanceCoordinator> =
     OnceLock::new();
 
@@ -47,9 +49,13 @@ where
     T: Send + 'static,
     F: FnOnce() -> Result<T, String> + Send + 'static,
 {
-    tauri::async_runtime::spawn_blocking(operation)
-        .await
-        .map_err(|error| format!("{operation_name} 后台任务异常终止：{error}"))?
+    let guard = UPDATE_INSTALL_GATE.get_or_init(Default::default).enter()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard;
+        operation()
+    })
+    .await
+    .map_err(|error| format!("{operation_name} 后台任务异常终止：{error}"))?
 }
 
 /// Returns the current dashboard snapshot.
@@ -168,6 +174,7 @@ fn prepare_cleanup_execution(
 fn execute_cleanup(
     request: clarity_core::ExecuteCleanupRequest,
 ) -> Result<clarity_core::CleanupExecutionReport, String> {
+    let _guard = UPDATE_INSTALL_GATE.get_or_init(Default::default).enter()?;
     CLEANUP_WORKFLOW
         .get_or_init(cleanup_workflow::CleanupWorkflow::default)
         .execute(&request)
@@ -179,6 +186,7 @@ fn execute_cleanup(
 fn restore_quarantine_entry(
     request: clarity_core::RestoreQuarantineRequest,
 ) -> Result<clarity_core::QuarantineRestoreResult, String> {
+    let _guard = UPDATE_INSTALL_GATE.get_or_init(Default::default).enter()?;
     CLEANUP_WORKFLOW
         .get_or_init(cleanup_workflow::CleanupWorkflow::default)
         .restore(&request)
@@ -190,6 +198,7 @@ fn restore_quarantine_entry(
 fn restore_quarantine_batch(
     request: clarity_core::RestoreQuarantineBatchRequest,
 ) -> Result<clarity_core::QuarantineRestoreBatchReport, String> {
+    let _guard = UPDATE_INSTALL_GATE.get_or_init(Default::default).enter()?;
     CLEANUP_WORKFLOW
         .get_or_init(cleanup_workflow::CleanupWorkflow::default)
         .restore_batch(&request)
@@ -201,6 +210,7 @@ fn restore_quarantine_batch(
 fn restore_quarantine_entry_to(
     request: clarity_core::RestoreQuarantineToRequest,
 ) -> Result<clarity_core::QuarantineRestoreResult, String> {
+    let _guard = UPDATE_INSTALL_GATE.get_or_init(Default::default).enter()?;
     CLEANUP_WORKFLOW
         .get_or_init(cleanup_workflow::CleanupWorkflow::default)
         .restore_to(&request)
@@ -223,6 +233,7 @@ fn prepare_quarantine_deletion(
 fn execute_quarantine_deletion(
     request: clarity_core::ExecuteQuarantineDeletionRequest,
 ) -> Result<clarity_core::QuarantineDeletionReport, String> {
+    let _guard = UPDATE_INSTALL_GATE.get_or_init(Default::default).enter()?;
     CLEANUP_WORKFLOW
         .get_or_init(cleanup_workflow::CleanupWorkflow::default)
         .execute_deletion(&request)
@@ -234,6 +245,7 @@ fn execute_quarantine_deletion(
 fn update_quarantine_policy(
     request: clarity_core::UpdateQuarantinePolicyRequest,
 ) -> Result<clarity_core::QuarantineIndex, String> {
+    let _guard = UPDATE_INSTALL_GATE.get_or_init(Default::default).enter()?;
     CLEANUP_WORKFLOW
         .get_or_init(cleanup_workflow::CleanupWorkflow::default)
         .update_policy(request)
@@ -534,12 +546,14 @@ fn get_diagnostics_snapshot() -> diagnostics::DiagnosticsSnapshot {
 /// Clears privacy-safe crash markers without touching audit or recovery records.
 #[tauri::command]
 fn clear_crash_diagnostics() -> Result<(), String> {
+    let _guard = UPDATE_INSTALL_GATE.get_or_init(Default::default).enter()?;
     diagnostics::clear_crash_reports()
 }
 
 /// Clears scan and audit history while preserving quarantine and recovery state.
 #[tauri::command]
 fn clear_activity_history() -> Result<(), String> {
+    let _guard = UPDATE_INSTALL_GATE.get_or_init(Default::default).enter()?;
     CLEANUP_WORKFLOW
         .get_or_init(cleanup_workflow::CleanupWorkflow::default)
         .clear_audit_events()?;
@@ -549,6 +563,18 @@ fn clear_activity_history() -> Result<(), String> {
     PRIVILEGED_WORKFLOW
         .get_or_init(privileged_workflow::PrivilegedWorkflow::default)
         .clear_audit_events()
+}
+
+/// Reserves process shutdown after explicit update confirmation, refusing active writes.
+#[tauri::command]
+fn reserve_update_installation() -> Result<(), String> {
+    UPDATE_INSTALL_GATE.get_or_init(Default::default).reserve()
+}
+
+/// Releases the shutdown reservation when updater launch fails.
+#[tauri::command]
+fn release_update_installation() -> Result<(), String> {
+    UPDATE_INSTALL_GATE.get_or_init(Default::default).release()
 }
 
 /// Starts the desktop runtime and registers the minimal command surface.
@@ -564,6 +590,7 @@ pub fn run() {
     diagnostics::set_crash_retention(settings.retain_crash_diagnostics);
     diagnostics::install_panic_hook();
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             // Windows can restore a stale minimized or undersized geometry from
             // a previous session. Recover only invalid bounds and preserve a
@@ -583,6 +610,8 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            reserve_update_installation,
+            release_update_installation,
             get_dashboard_snapshot,
             scan_cleanup_preview,
             prepare_cleanup_plan,

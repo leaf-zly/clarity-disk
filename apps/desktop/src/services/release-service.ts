@@ -1,7 +1,7 @@
 import type { UpdateRelease } from "@/types/operations";
 
 const RELEASES_URL =
-  "https://api.github.com/repos/leaf-zly/clarity-disk/releases?per_page=1";
+  "https://api.github.com/repos/leaf-zly/clarity-disk/releases?per_page=100";
 const RELEASES_PAGE = "https://github.com/leaf-zly/clarity-disk/releases";
 
 /**
@@ -11,6 +11,7 @@ const RELEASES_PAGE = "https://github.com/leaf-zly/clarity-disk/releases";
 export async function checkForUpdates(): Promise<UpdateRelease> {
   const response = await fetch(RELEASES_URL, {
     headers: { Accept: "application/vnd.github+json" },
+    signal: AbortSignal.timeout(20_000),
   });
   // GitHub deliberately returns 404 for private/inaccessible repositories as
   // well as missing resources. Neither state proves that an update failed.
@@ -18,7 +19,16 @@ export async function checkForUpdates(): Promise<UpdateRelease> {
   if (!response.ok) throw new Error(`更新服务返回 HTTP ${response.status}`);
   const payload = (await response.json()) as unknown;
   if (!Array.isArray(payload)) throw new Error("更新元数据格式无效");
-  const release = payload[0];
+  // Legacy preview tags and mutable updater feeds are not semantic stable releases.
+  const release = payload
+    .filter(isReleasePayload)
+    .filter((item) => !item.prerelease && !item.draft)
+    .sort((left, right) =>
+      compareVersions(
+        right.tag_name.replace(/^v/, ""),
+        left.tag_name.replace(/^v/, ""),
+      ),
+    )[0];
   if (release === undefined) return unpublishedRelease();
   if (!isReleasePayload(release)) throw new Error("更新元数据格式无效");
 
@@ -37,7 +47,10 @@ export async function checkForUpdates(): Promise<UpdateRelease> {
   };
 }
 
+/** Read-only stable release metadata; never authorizes installation. */
 interface GitHubReleasePayload {
+  prerelease?: boolean;
+  draft?: boolean;
   tag_name: string;
   html_url: string;
   published_at: string;
@@ -64,7 +77,7 @@ function isReleasePayload(value: unknown): value is GitHubReleasePayload {
   const candidate = value as Partial<GitHubReleasePayload>;
   return (
     typeof candidate.tag_name === "string" &&
-    /^v?\d+\.\d+\.\d+/.test(candidate.tag_name) &&
+    /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(candidate.tag_name) &&
     typeof candidate.html_url === "string" &&
     candidate.html_url.startsWith(`${RELEASES_PAGE}/`) &&
     typeof candidate.published_at === "string" &&

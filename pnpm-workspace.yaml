@@ -4,6 +4,7 @@ packages:
 catalog:
   "@tauri-apps/api": 2.11.1
   "@tauri-apps/cli": 2.11.4
+  "@tauri-apps/plugin-updater": 2.10.1
   "@types/node": 24.10.13
   "@vitejs/plugin-vue": 6.0.8
   "@vitest/coverage-v8": 4.1.10

@@ -48,6 +48,9 @@ jobs:
       - name: Unit tests
         run: pnpm test
 
+      - name: Updater manifest tests
+        run: node --test scripts/release/create-update-manifest.test.mjs
+
       - name: Build frontend
         run: pnpm --filter @clarity-disk/desktop build:web
 
